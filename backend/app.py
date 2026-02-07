@@ -8,8 +8,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .data_sources import fetch_fund_gz, fetch_holdings, fetch_nav_history, fetch_quote, search_market_funds
-from .models import EstimateComponent, EstimateResponse, FundCreate, FundInfo, FundUpdate, NavHistoryResponse, PortfolioOverview
+from .data_sources import (
+    analyze_news_with_deepseek,
+    fetch_fund_gz,
+    fetch_holdings,
+    fetch_nav_history,
+    fetch_news_feed,
+    fetch_quote,
+    search_market_funds,
+)
+from .models import (
+    EstimateComponent,
+    EstimateResponse,
+    FundCreate,
+    FundInfo,
+    FundUpdate,
+    NavHistoryResponse,
+    NewsAnalysisRequest,
+    NewsAnalysisResponse,
+    NewsFeedResponse,
+    NewsItem,
+    PortfolioOverview,
+)
 from .storage import (
     delete_fund,
     get_fund,
@@ -535,6 +555,41 @@ async def api_nav_history(code: str, limit: int = 30) -> NavHistoryResponse:
         return NavHistoryResponse(code=code, name=fund["name"], items=items)
     except Exception:
         raise HTTPException(status_code=502, detail="净值数据获取失败，请稍后重试")
+
+
+@app.get("/api/news/feed", response_model=NewsFeedResponse)
+async def api_news_feed(source: str = "rss", limit: int = 20) -> NewsFeedResponse:
+    items = await fetch_news_feed(source=source, limit=limit)
+    normalized = [NewsItem(source=source, **item) for item in items]
+    return NewsFeedResponse(source=source, items=normalized)
+
+
+@app.post("/api/ai/news/analyze", response_model=NewsAnalysisResponse)
+async def api_ai_news_analyze(payload: NewsAnalysisRequest) -> NewsAnalysisResponse:
+    try:
+        result = await analyze_news_with_deepseek(payload.title, payload.content, payload.source)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="DeepSeek API key 未配置")
+    except Exception:
+        raise HTTPException(status_code=502, detail="AI 分析失败，请稍后重试")
+    summary = str(result.get("summary") or "")
+    sentiment = str(result.get("sentiment") or "neutral")
+    impacted_assets = result.get("impacted_assets") or []
+    if not isinstance(impacted_assets, list):
+        impacted_assets = [str(impacted_assets)]
+    confidence_raw = result.get("confidence")
+    try:
+        confidence = float(confidence_raw)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    reasoning = result.get("reasoning")
+    return NewsAnalysisResponse(
+        summary=summary,
+        sentiment=sentiment,
+        impacted_assets=[str(item) for item in impacted_assets],
+        confidence=confidence,
+        reasoning=str(reasoning) if reasoning is not None else None,
+    )
 
 
 if DIST_DIR.exists():

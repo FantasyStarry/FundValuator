@@ -93,3 +93,30 @@ class PortfolioOverview(BaseModel):
     transition_progress: Optional[float] = None
     official_updated: bool = False
     holiday_mode: bool = False
+
+
+class NewsItem(BaseModel):
+    title: str
+    link: Optional[str] = None
+    source: Optional[str] = None
+    published_at: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class NewsFeedResponse(BaseModel):
+    source: str
+    items: List[NewsItem]
+
+
+class NewsAnalysisRequest(BaseModel):
+    title: str
+    content: str
+    source: Optional[str] = None
+
+
+class NewsAnalysisResponse(BaseModel):
+    summary: str
+    sentiment: str
+    impacted_assets: List[str]
+    confidence: float
+    reasoning: Optional[str] = None

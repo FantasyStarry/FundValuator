@@ -1,9 +1,17 @@
 import json
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import httpx
+
+from .config import (
+    get_deepseek_api_key,
+    get_deepseek_base_url,
+    get_deepseek_model,
+    get_news_rss_url,
+)
 
 
 async def fetch_text(url: str, timeout: float = 6.0) -> str:
@@ -31,6 +39,16 @@ def _decode_js_string(text: str) -> str:
         return bytes(text, "utf-8").decode("unicode_escape")
     except Exception:
         return text
+
+
+def _extract_json_object(text: str) -> Optional[dict]:
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        return None
 
 
 async def fetch_fund_gz(code: str) -> Optional[dict]:
@@ -212,3 +230,78 @@ async def search_market_funds(keyword: str) -> List[dict]:
         return results
     except Exception:
         return []
+
+
+async def fetch_news_rss(url: str, limit: int = 20) -> List[dict]:
+    text = await fetch_text(url, timeout=8.0)
+    try:
+        root = ET.fromstring(text)
+    except Exception:
+        return []
+    items: List[dict] = []
+    for item in root.findall(".//item"):
+        title = (item.findtext("title") or "").strip()
+        if not title:
+            continue
+        link = (item.findtext("link") or "").strip() or None
+        pub_date = (item.findtext("pubDate") or "").strip() or None
+        description = (item.findtext("description") or "").strip()
+        summary = _clean_html(description) if description else None
+        items.append(
+            {
+                "title": title,
+                "link": link,
+                "published_at": pub_date,
+                "summary": summary,
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items
+
+
+async def fetch_news_feed(source: str = "rss", limit: int = 20) -> List[dict]:
+    if source != "rss":
+        source = "rss"
+    url = get_news_rss_url()
+    return await fetch_news_rss(url, limit=limit)
+
+
+async def analyze_news_with_deepseek(title: str, content: str, source: Optional[str] = None) -> dict:
+    api_key = get_deepseek_api_key()
+    if not api_key:
+        raise ValueError("DEEPSEEK_API_KEY is required")
+    base_url = get_deepseek_base_url().rstrip("/")
+    model = get_deepseek_model()
+    url = f"{base_url}/v1/chat/completions"
+    system_prompt = "你是金融市场研究助手。输出严格的 JSON，不要包含多余文本。"
+    user_prompt = (
+        "请分析以下新闻，给出简洁总结、情绪判断、可能影响的资产或板块、置信度。"
+        "返回 JSON 格式："
+        '{"summary":"...","sentiment":"negative|neutral|positive","impacted_assets":["..."],"confidence":0.0,"reasoning":"..."}'
+        f"\n标题: {title}\n来源: {source or ''}\n内容: {content}"
+    )
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 800,
+    }
+    headers = {"Authorization": f"Bearer {api_key}"}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+    content_text = ""
+    if isinstance(data, dict):
+        choices = data.get("choices") or []
+        if choices:
+            message = choices[0].get("message") or {}
+            content_text = message.get("content") or ""
+    parsed = _extract_json_object(content_text) or {}
+    if not parsed:
+        parsed = {"summary": content_text.strip(), "sentiment": "neutral", "impacted_assets": [], "confidence": 0.0, "reasoning": ""}
+    return parsed
