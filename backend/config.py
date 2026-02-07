@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -45,4 +46,38 @@ def get_deepseek_model() -> str:
 
 def get_news_rss_url() -> str:
     config = _load_local_config()
-    return os.getenv("NEWS_RSS_URL") or _get_nested(config, ["news", "rss_url"]) or "https://finance.eastmoney.com/rss/cjxw.xml"
+    return os.getenv("NEWS_RSS_URL") or _get_nested(config, ["news", "rss_url"]) or "http://rss.sina.com.cn/roll/finance/hot_roll.xml"
+
+
+def get_news_keywords() -> List[str]:
+    config = _load_local_config()
+    raw = _get_nested(config, ["news", "keywords"])
+    if raw:
+        return [word for word in re.split(r"[,\s]+", raw) if word]
+    return [
+        "A股",
+        "A股",
+        "沪深",
+        "上证",
+        "深证",
+        "创业板",
+        "科创板",
+        "北交所",
+        "证券",
+        "券商",
+        "指数",
+        "中证",
+        "ETF",
+        "基金",
+        "公募",
+        "私募",
+        "两融",
+        "涨停",
+        "跌停",
+        "限售",
+        "减持",
+        "IPO",
+        "新股",
+        "回购",
+        "分红",
+    ]

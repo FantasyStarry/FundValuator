@@ -2,6 +2,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, List, Optional, Tuple
 
 import httpx
@@ -10,6 +11,7 @@ from .config import (
     get_deepseek_api_key,
     get_deepseek_base_url,
     get_deepseek_model,
+    get_news_keywords,
     get_news_rss_url,
 )
 
@@ -39,6 +41,18 @@ def _decode_js_string(text: str) -> str:
         return bytes(text, "utf-8").decode("unicode_escape")
     except Exception:
         return text
+
+
+def _parse_rss_date(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = parsedate_to_datetime(value)
+        if parsed.tzinfo:
+            return parsed.astimezone()
+        return parsed
+    except Exception:
+        return None
 
 
 def _extract_json_object(text: str) -> Optional[dict]:
@@ -247,16 +261,21 @@ async def fetch_news_rss(url: str, limit: int = 20) -> List[dict]:
         pub_date = (item.findtext("pubDate") or "").strip() or None
         description = (item.findtext("description") or "").strip()
         summary = _clean_html(description) if description else None
+        parsed_date = _parse_rss_date(pub_date)
         items.append(
             {
                 "title": title,
                 "link": link,
-                "published_at": pub_date,
+                "published_at": parsed_date.isoformat(timespec="seconds") if parsed_date else pub_date,
+                "_published_dt": parsed_date,
                 "summary": summary,
             }
         )
         if len(items) >= limit:
             break
+    items.sort(key=lambda item: item.get("_published_dt") or datetime.min, reverse=True)
+    for item in items:
+        item.pop("_published_dt", None)
     return items
 
 
@@ -264,7 +283,19 @@ async def fetch_news_feed(source: str = "rss", limit: int = 20) -> List[dict]:
     if source != "rss":
         source = "rss"
     url = get_news_rss_url()
-    return await fetch_news_rss(url, limit=limit)
+    try:
+        items = await fetch_news_rss(url, limit=limit * 3)
+    except Exception:
+        return []
+    keywords = get_news_keywords()
+    if keywords:
+        filtered = []
+        for item in items:
+            title = item.get("title") or ""
+            if any(word in title for word in keywords):
+                filtered.append(item)
+        items = filtered
+    return items[:limit]
 
 
 async def analyze_news_with_deepseek(title: str, content: str, source: Optional[str] = None) -> dict:

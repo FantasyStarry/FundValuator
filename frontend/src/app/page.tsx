@@ -99,6 +99,27 @@ type NavHistoryResponse = {
   items: NavItem[];
 };
 
+type NewsItem = {
+  title: string;
+  link?: string | null;
+  source?: string | null;
+  published_at?: string | null;
+  summary?: string | null;
+};
+
+type NewsFeedResponse = {
+  source: string;
+  items: NewsItem[];
+};
+
+type NewsAnalysisResponse = {
+  summary: string;
+  sentiment: string;
+  impacted_assets: string[];
+  confidence: number;
+  reasoning?: string | null;
+};
+
 type MarketFund = {
   code: string;
   name: string;
@@ -156,9 +177,28 @@ const fetchNavHistory = (code: string, limit = 30) =>
 const searchMarketFunds = (keyword: string) =>
   fetchJson<MarketFund[]>(`/market/search?keyword=${encodeURIComponent(keyword)}`);
 
+const fetchNewsFeed = (source = "rss", limit = 20) =>
+  fetchJson<NewsFeedResponse>(`/news/feed?source=${encodeURIComponent(source)}&limit=${limit}`);
+
+const analyzeNews = (payload: { title: string; content: string; source?: string | null }) =>
+  fetchJson<NewsAnalysisResponse>("/ai/news/analyze", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+const AUTO_ANALYZE_INTERVAL_MS = 10 * 60 * 1000;
+const AUTO_ANALYZE_LIMIT = 6;
+
 const formatNumber = (value?: number | null, digits = 2) => {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
   return value.toFixed(digits);
+};
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString("zh-CN", { hour12: false });
 };
 
 const formatPct = (value?: number | null, digits = 2) => {
@@ -194,6 +234,13 @@ export default function Home() {
   const [inputShares, setInputShares] = useState("");
   const [inputCost, setInputCost] = useState("");
   const [showHoldingSheet, setShowHoldingSheet] = useState(false);
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const newsSource = "rss";
+  const [selectedNewsKey, setSelectedNewsKey] = useState<string>("");
+  const [analysisCache, setAnalysisCache] = useState<Record<string, NewsAnalysisResponse>>({});
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const analysisCacheRef = useRef<Record<string, NewsAnalysisResponse>>({});
   const chartRef = useRef<HTMLDivElement>(null);
 
   const selectedFund = useMemo(() => funds.find((item) => item.code === selectedCode), [funds, selectedCode]);
@@ -275,6 +322,70 @@ export default function Home() {
     [funds, syncInputsFromFund]
   );
 
+  const loadNews = useCallback(async () => {
+    setNewsLoading(true);
+    try {
+      const res = await fetchNewsFeed(newsSource, 20);
+      const items = res.items ?? [];
+      setNewsItems(items);
+      setSelectedNewsKey((current) => {
+        if (current) return current;
+        const first = items[0];
+        if (!first) return "";
+        return first.link || first.title;
+      });
+      return items;
+    } finally {
+      setNewsLoading(false);
+    }
+  }, [newsSource]);
+
+  const handleAnalyzeNews = useCallback(
+    async (item: NewsItem) => {
+      const key = item.link || item.title;
+      if (!key) return;
+      if (analysisCache[key]) return;
+      setAnalysisLoading(true);
+      try {
+        const content = item.summary || item.title;
+        const result = await analyzeNews({ title: item.title, content, source: item.source || newsSource });
+        setAnalysisCache((prev) => ({ ...prev, [key]: result }));
+      } finally {
+        setAnalysisLoading(false);
+      }
+    },
+    [analysisCache, newsSource]
+  );
+
+  const runAutoAnalyze = useCallback(
+    async (items: NewsItem[]) => {
+      if (!items.length || analysisLoading) return;
+      const cache = analysisCacheRef.current;
+      const pending = items.filter((item) => {
+        const key = item.link || item.title;
+        return key && !cache[key];
+      });
+      if (!pending.length) return;
+      setAnalysisLoading(true);
+      try {
+        for (const item of pending.slice(0, AUTO_ANALYZE_LIMIT)) {
+          const key = item.link || item.title;
+          if (!key) continue;
+          try {
+            const content = item.summary || item.title;
+            const result = await analyzeNews({ title: item.title, content, source: item.source || newsSource });
+            setAnalysisCache((prev) => ({ ...prev, [key]: result }));
+          } catch {
+            continue;
+          }
+        }
+      } finally {
+        setAnalysisLoading(false);
+      }
+    },
+    [analysisLoading, newsSource]
+  );
+
   useEffect(() => {
     loadFunds().catch((err) => pushStatus(err.message));
     loadPortfolio().catch((err) => pushStatus(err.message));
@@ -290,6 +401,30 @@ export default function Home() {
     syncInputsFromFund(selectedFund);
   }, [selectedFund, syncInputsFromFund]);
 
+  useEffect(() => {
+    analysisCacheRef.current = analysisCache;
+  }, [analysisCache]);
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      try {
+        const items = await loadNews();
+        if (!active || !items) return;
+        await runAutoAnalyze(items);
+      } catch (err) {
+        if (err instanceof Error) {
+          pushStatus(err.message);
+        }
+      }
+    };
+    run();
+    const handle = setInterval(run, AUTO_ANALYZE_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(handle);
+    };
+  }, [loadNews, runAutoAnalyze, pushStatus]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -380,6 +515,16 @@ export default function Home() {
       pushStatus(err instanceof Error ? err.message : "更新失败");
     }
   };
+
+  const selectedNews = useMemo(() => {
+    if (!selectedNewsKey) return null;
+    return newsItems.find((item) => (item.link || item.title) === selectedNewsKey) || null;
+  }, [newsItems, selectedNewsKey]);
+
+  const selectedAnalysis = useMemo(() => {
+    if (!selectedNewsKey) return null;
+    return analysisCache[selectedNewsKey] || null;
+  }, [analysisCache, selectedNewsKey]);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -563,6 +708,111 @@ export default function Home() {
                         过渡 {Math.round(portfolio.transition_progress * 100)}%
                       </Badge>
                     )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border">
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
+                <div className="space-y-1">
+                  <CardTitle className="text-base">新闻流与 AI 解读</CardTitle>
+                  <CardDescription>仅 A 股相关，按时间排序，每 10 分钟自动分析新增资讯</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="h-8 border-border" onClick={() => loadNews().catch((err) => pushStatus(err.message))} disabled={newsLoading}>
+                    <RefreshCw className="h-4 w-4 mr-1" /> 刷新
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => selectedNews && handleAnalyzeNews(selectedNews)}
+                    disabled={!selectedNews || analysisLoading}
+                  >
+                    分析当前
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-4">
+                  <div className="border border-border rounded-md bg-secondary/40 min-h-[280px]">
+                    <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                      <span className="text-sm font-medium">最新资讯</span>
+                      <Badge variant="secondary" className="bg-muted text-foreground">{newsItems.length}</Badge>
+                    </div>
+                    <div className="max-h-[360px] overflow-y-auto">
+                      {newsItems.map((item) => {
+                        const key = item.link || item.title;
+                        const isActive = key === selectedNewsKey;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className={cn(
+                              "w-full text-left px-4 py-3 border-b border-border/60 transition-colors",
+                              isActive ? "bg-muted/60" : "hover:bg-muted/30"
+                            )}
+                            onClick={() => {
+                              if (!key) return;
+                              setSelectedNewsKey(key);
+                              if (!analysisCache[key]) {
+                                handleAnalyzeNews(item).catch((err) => pushStatus(err.message));
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-sm font-semibold leading-5">{item.title}</span>
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground flex items-center gap-3">
+                              <span>{formatDateTime(item.published_at)}</span>
+                              {item.link && <span className="truncate max-w-[240px]">{item.link}</span>}
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {!newsItems.length && (
+                        <div className="h-[260px] flex items-center justify-center text-sm text-muted-foreground">
+                          暂无新闻
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="border border-border rounded-md bg-secondary/40 p-4 min-h-[280px]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">AI 解读</span>
+                      <Badge variant="outline" className="border-border text-muted-foreground">
+                        {selectedAnalysis ? `置信度 ${formatNumber(selectedAnalysis.confidence, 2)}` : "未分析"}
+                      </Badge>
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      <div className="p-3 rounded-md border border-border bg-card">
+                        <div className="text-xs text-muted-foreground mb-1">摘要</div>
+                        <div className="text-sm">
+                          {selectedAnalysis?.summary || (selectedNews?.summary ?? "请选择新闻或点击分析")}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="p-3 rounded-md border border-border bg-card">
+                          <div className="text-xs text-muted-foreground mb-1">情绪</div>
+                          <div className="text-sm font-semibold">{selectedAnalysis?.sentiment ?? "—"}</div>
+                        </div>
+                        <div className="p-3 rounded-md border border-border bg-card">
+                          <div className="text-xs text-muted-foreground mb-1">影响资产</div>
+                          <div className="text-sm">
+                            {selectedAnalysis?.impacted_assets?.length ? selectedAnalysis.impacted_assets.join("、") : "—"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-md border border-border bg-card">
+                        <div className="text-xs text-muted-foreground mb-1">理由</div>
+                        <div className="text-sm">{selectedAnalysis?.reasoning ?? "—"}</div>
+                      </div>
+                      {analysisLoading && (
+                        <div className="text-xs text-muted-foreground">分析中...</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
