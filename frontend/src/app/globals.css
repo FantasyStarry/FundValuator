@@ -1,0 +1,81 @@
+@config "../../tailwind.config.ts";
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: #151714;
+    --foreground: #f4f2ec;
+
+    --card: #20241f;
+    --card-foreground: #f4f2ec;
+ 
+    --popover: #232822;
+    --popover-foreground: #f4f2ec;
+ 
+    --primary: #4b7a5a;
+    --primary-foreground: #f6f4ee;
+ 
+    --secondary: #2b302a;
+    --secondary-foreground: #eae7df;
+ 
+    --muted: #313831;
+    --muted-foreground: #b2b8ae;
+ 
+    --accent: #5d7f63;
+    --accent-foreground: #f6f4ee;
+ 
+    --destructive: #8b2f2f;
+    --destructive-foreground: #f6f4ee;
+
+    --border: #3a423a;
+    --input: #242a24;
+    --ring: rgba(75, 122, 90, 0.55);
+ 
+    --radius: 10px;
+    
+    --shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Custom Glass Effects */
+.glass-orb {
+  position: absolute;
+  width: 360px;
+  height: 360px;
+  border-radius: 50%;
+  filter: blur(12px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.orb-1 {
+  top: -120px;
+  left: -80px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.orb-2 {
+  bottom: -140px;
+  right: -100px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.glass-panel {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius);
+}
