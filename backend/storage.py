@@ -1,4 +1,5 @@
-from typing import List, Optional
+from typing import Dict, List, Optional
+import json
 
 from psycopg import connect
 from psycopg.rows import dict_row
@@ -67,6 +68,19 @@ def init_db() -> None:
                     source TEXT NOT NULL,
                     published_at TEXT,
                     summary TEXT,
+                    updated_at TEXT
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS news_analysis (
+                    news_id TEXT PRIMARY KEY,
+                    summary TEXT,
+                    sentiment TEXT,
+                    impacted_assets TEXT,
+                    confidence REAL,
+                    reasoning TEXT,
                     updated_at TEXT
                 )
                 """
@@ -241,3 +255,63 @@ def list_news_items(source: str, limit: int = 20) -> List[dict]:
             )
             rows = cur.fetchall()
     return list(rows)
+
+
+def upsert_news_analysis(news_id: str, analysis: Dict, updated_at: Optional[str]) -> None:
+    impacted_assets = analysis.get("impacted_assets") or []
+    payload = (
+        news_id,
+        analysis.get("summary"),
+        analysis.get("sentiment"),
+        json.dumps(impacted_assets, ensure_ascii=False),
+        analysis.get("confidence"),
+        analysis.get("reasoning"),
+        updated_at,
+    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO news_analysis(news_id, summary, sentiment, impacted_assets, confidence, reasoning, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT(news_id) DO UPDATE SET
+                    summary = excluded.summary,
+                    sentiment = excluded.sentiment,
+                    impacted_assets = excluded.impacted_assets,
+                    confidence = excluded.confidence,
+                    reasoning = excluded.reasoning,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
+            )
+
+
+def list_news_analysis(news_ids: List[str]) -> Dict[str, dict]:
+    if not news_ids:
+        return {}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT news_id, summary, sentiment, impacted_assets, confidence, reasoning
+                FROM news_analysis
+                WHERE news_id = ANY(%s)
+                """,
+                (news_ids,),
+            )
+            rows = cur.fetchall()
+    result: Dict[str, dict] = {}
+    for row in rows:
+        assets_raw = row.get("impacted_assets") or "[]"
+        try:
+            assets = json.loads(assets_raw)
+        except json.JSONDecodeError:
+            assets = []
+        result[row["news_id"]] = {
+            "summary": row.get("summary") or "",
+            "sentiment": row.get("sentiment") or "neutral",
+            "impacted_assets": [str(item) for item in assets] if isinstance(assets, list) else [],
+            "confidence": float(row.get("confidence") or 0.0),
+            "reasoning": row.get("reasoning"),
+        }
+    return result

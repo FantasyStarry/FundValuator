@@ -101,6 +101,7 @@ class NewsItem(BaseModel):
     source: Optional[str] = None
     published_at: Optional[str] = None
     summary: Optional[str] = None
+    analysis: Optional["NewsAnalysisResponse"] = None
 
 
 class NewsFeedResponse(BaseModel):

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import asyncio
 import json
 from datetime import datetime, date
@@ -42,11 +42,13 @@ from .storage import (
     get_fund,
     get_holdings,
     init_db,
+    list_news_analysis,
     list_news_items,
     list_funds,
     replace_holdings,
     update_fund_source_state,
     update_fund_holding,
+    upsert_news_analysis,
     upsert_news_items,
     upsert_fund,
 )
@@ -108,6 +110,31 @@ def _normalize_news_items(items: List[dict], source: str) -> List[dict]:
     return normalized
 
 
+def _normalize_news_analysis(result: dict) -> dict:
+    summary = str(result.get("summary") or "")
+    sentiment = str(result.get("sentiment") or "neutral")
+    impacted_assets = result.get("impacted_assets") or []
+    if not isinstance(impacted_assets, list):
+        impacted_assets = [str(impacted_assets)]
+    confidence_raw = result.get("confidence")
+    try:
+        confidence = float(confidence_raw)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    reasoning = result.get("reasoning")
+    return {
+        "summary": summary,
+        "sentiment": sentiment,
+        "impacted_assets": [str(item) for item in impacted_assets],
+        "confidence": confidence,
+        "reasoning": str(reasoning) if reasoning is not None else None,
+    }
+
+
+def _analysis_cache_key(news_id: str) -> str:
+    return f"news:analysis:{news_id}"
+
+
 async def _redis_get_json(key: str) -> Optional[List[dict]]:
     if not redis_client:
         return None
@@ -123,11 +150,78 @@ async def _redis_get_json(key: str) -> Optional[List[dict]]:
     return data
 
 
+async def _redis_get_obj(key: str) -> Optional[dict]:
+    if not redis_client:
+        return None
+    raw = await redis_client.get(key)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
 async def _redis_set_json(key: str, value: List[dict], ttl_sec: int) -> None:
     if not redis_client:
         return
     payload = json.dumps(value, ensure_ascii=False)
     await redis_client.set(key, payload, ex=ttl_sec)
+
+
+async def _redis_set_obj(key: str, value: dict, ttl_sec: int) -> None:
+    if not redis_client:
+        return
+    payload = json.dumps(value, ensure_ascii=False)
+    await redis_client.set(key, payload, ex=ttl_sec)
+
+
+async def _load_news_analysis(items: List[dict]) -> Dict[str, dict]:
+    items_map = { _news_item_key(item): item for item in items if _news_item_key(item) }
+    news_ids = list(items_map.keys())
+    if not news_ids:
+        return {}
+    analysis_map: Dict[str, dict] = {}
+    missing_ids: List[str] = []
+    if redis_client:
+        for news_id in news_ids:
+            cached = await _redis_get_obj(_analysis_cache_key(news_id))
+            if cached:
+                analysis_map[news_id] = cached
+            else:
+                missing_ids.append(news_id)
+    else:
+        missing_ids = news_ids
+    if missing_ids:
+        db_map = list_news_analysis(missing_ids)
+        for news_id, analysis in db_map.items():
+            analysis_map[news_id] = analysis
+            if redis_client:
+                await _redis_set_obj(_analysis_cache_key(news_id), analysis, NEWS_CACHE_TTL_SEC)
+        missing_ids = [news_id for news_id in missing_ids if news_id not in db_map]
+    if missing_ids:
+        semaphore = asyncio.Semaphore(3)
+        async def run_one(news_id: str):
+            item = items_map[news_id]
+            content = item.get("summary") or item.get("title") or ""
+            async with semaphore:
+                result = await analyze_news_with_deepseek(item["title"], content, item.get("source"))
+            normalized = _normalize_news_analysis(result)
+            now_iso = datetime.now().isoformat(timespec="seconds")
+            upsert_news_analysis(news_id, normalized, now_iso)
+            if redis_client:
+                await _redis_set_obj(_analysis_cache_key(news_id), normalized, NEWS_CACHE_TTL_SEC)
+            return news_id, normalized
+        results = await asyncio.gather(*[run_one(news_id) for news_id in missing_ids], return_exceptions=True)
+        for res in results:
+            if isinstance(res, Exception):
+                continue
+            news_id, analysis = res
+            analysis_map[news_id] = analysis
+    return analysis_map
 
 
 async def _load_news_with_cache(source: str, limit: int) -> List[dict]:
@@ -677,7 +771,12 @@ async def api_nav_history(code: str, limit: int = 30) -> NavHistoryResponse:
 @app.get("/api/news/feed", response_model=NewsFeedResponse)
 async def api_news_feed(source: str = "rss", limit: int = 20) -> NewsFeedResponse:
     items = await _load_news_with_cache(source=source, limit=limit)
-    normalized = [NewsItem(**item) for item in items]
+    analysis_map = await _load_news_analysis(items)
+    normalized = []
+    for item in items:
+        key = _news_item_key(item)
+        analysis = analysis_map.get(key)
+        normalized.append(NewsItem(**{**item, "analysis": analysis}))
     return NewsFeedResponse(source=source if source == "rss" else "rss", items=normalized)
 
 
@@ -689,24 +788,14 @@ async def api_ai_news_analyze(payload: NewsAnalysisRequest) -> NewsAnalysisRespo
         raise HTTPException(status_code=400, detail="DeepSeek API key 未配置")
     except Exception:
         raise HTTPException(status_code=502, detail="AI 分析失败，请稍后重试")
-    summary = str(result.get("summary") or "")
-    sentiment = str(result.get("sentiment") or "neutral")
-    impacted_assets = result.get("impacted_assets") or []
-    if not isinstance(impacted_assets, list):
-        impacted_assets = [str(impacted_assets)]
-    confidence_raw = result.get("confidence")
-    try:
-        confidence = float(confidence_raw)
-    except (TypeError, ValueError):
-        confidence = 0.0
-    reasoning = result.get("reasoning")
-    return NewsAnalysisResponse(
-        summary=summary,
-        sentiment=sentiment,
-        impacted_assets=[str(item) for item in impacted_assets],
-        confidence=confidence,
-        reasoning=str(reasoning) if reasoning is not None else None,
-    )
+    normalized = _normalize_news_analysis(result)
+    news_id = (payload.title or "").strip()
+    if news_id:
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        upsert_news_analysis(news_id, normalized, now_iso)
+        if redis_client:
+            await _redis_set_obj(_analysis_cache_key(news_id), normalized, NEWS_CACHE_TTL_SEC)
+    return NewsAnalysisResponse(**normalized)
 
 
 if DIST_DIR.exists():

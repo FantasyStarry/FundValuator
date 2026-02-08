@@ -287,14 +287,6 @@ async def fetch_news_feed(source: str = "rss", limit: int = 20) -> List[dict]:
         items = await fetch_news_rss(url, limit=limit * 3)
     except Exception:
         return []
-    keywords = get_news_keywords()
-    if keywords:
-        filtered = []
-        for item in items:
-            title = item.get("title") or ""
-            if any(word in title for word in keywords):
-                filtered.append(item)
-        items = filtered
     return items[:limit]
 
 

@@ -105,6 +105,7 @@ type NewsItem = {
   source?: string | null;
   published_at?: string | null;
   summary?: string | null;
+  analysis?: NewsAnalysisResponse | null;
 };
 
 type NewsFeedResponse = {
@@ -180,12 +181,6 @@ const searchMarketFunds = (keyword: string) =>
 const fetchNewsFeed = (source = "rss", limit = 200) =>
   fetchJson<NewsFeedResponse>(`/news/feed?source=${encodeURIComponent(source)}&limit=${limit}`);
 
-const analyzeNews = (payload: { title: string; content: string; source?: string | null }) =>
-  fetchJson<NewsAnalysisResponse>("/ai/news/analyze", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
 const NEWS_REFRESH_INTERVAL_MS = 15 * 1000;
 const NEWS_MAX_ITEMS = 200;
 const NEWS_CLEAN_INTERVAL_MS = 10 * 60 * 1000;
@@ -237,9 +232,8 @@ export default function Home() {
   const [showHoldingSheet, setShowHoldingSheet] = useState(false);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const newsSource = "rss";
-  const [hoveredNewsKey, setHoveredNewsKey] = useState<string>("");
+  const [selectedNewsKey, setSelectedNewsKey] = useState<string>("");
   const [analysisCache, setAnalysisCache] = useState<Record<string, NewsAnalysisResponse>>({});
-  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [newsLoading, setNewsLoading] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const headerRef = useRef<HTMLElement>(null);
@@ -330,12 +324,18 @@ export default function Home() {
       const res = await fetchNewsFeed(newsSource, NEWS_MAX_ITEMS);
       const items = (res.items ?? []).slice(0, NEWS_MAX_ITEMS);
       setNewsItems(items);
-      setAnalysisCache((prev) => {
+      setSelectedNewsKey((current) => {
+        if (current) return current;
+        const first = items[0];
+        if (!first) return "";
+        return first.link || first.title;
+      });
+      setAnalysisCache(() => {
         const next: Record<string, NewsAnalysisResponse> = {};
-        const keys = new Set(items.map((item) => item.link || item.title).filter(Boolean));
-        Object.keys(prev).forEach((key) => {
-          if (keys.has(key)) {
-            next[key] = prev[key];
+        items.forEach((item) => {
+          const key = item.link || item.title;
+          if (key && item.analysis) {
+            next[key] = item.analysis;
           }
         });
         return next;
@@ -345,23 +345,6 @@ export default function Home() {
       setNewsLoading(false);
     }
   }, [newsSource]);
-
-  const handleAnalyzeNews = useCallback(
-    async (item: NewsItem) => {
-      const key = item.link || item.title;
-      if (!key) return;
-      if (analysisCache[key]) return;
-      setAnalysisLoading(true);
-      try {
-        const content = item.summary || item.title;
-        const result = await analyzeNews({ title: item.title, content, source: item.source || newsSource });
-        setAnalysisCache((prev) => ({ ...prev, [key]: result }));
-      } finally {
-        setAnalysisLoading(false);
-      }
-    },
-    [analysisCache, newsSource]
-  );
 
 
   useEffect(() => {
@@ -519,14 +502,19 @@ export default function Home() {
     }
   };
 
-  const hoveredAnalysis = useMemo(() => {
-    if (!hoveredNewsKey) return null;
-    return analysisCache[hoveredNewsKey] || null;
-  }, [analysisCache, hoveredNewsKey]);
-
   const listMaxHeight = headerHeight
     ? `calc(100vh - ${Math.ceil(headerHeight)}px)`
     : "calc(100vh - 120px)";
+
+  const selectedNews = useMemo(() => {
+    if (!selectedNewsKey) return null;
+    return newsItems.find((item) => (item.link || item.title) === selectedNewsKey) || null;
+  }, [newsItems, selectedNewsKey]);
+
+  const selectedAnalysis = useMemo(() => {
+    if (!selectedNewsKey) return null;
+    return analysisCache[selectedNewsKey] || null;
+  }, [analysisCache, selectedNewsKey]);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -874,7 +862,7 @@ export default function Home() {
           </main>
 
           <aside style={{ maxHeight: listMaxHeight }} className="flex flex-col gap-6 min-h-0">
-            <div style={{ maxHeight: listMaxHeight }} className="border border-border rounded-md bg-card shadow-sm flex flex-col min-h-0">
+            <div style={{ maxHeight: listMaxHeight }} className="border border-border rounded-md bg-card shadow-sm flex flex-col min-h-0 flex-[5]">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <span className="text-sm font-medium">最新资讯</span>
                 <div className="flex items-center gap-2">
@@ -885,22 +873,20 @@ export default function Home() {
               <div className="flex-1 overflow-y-auto">
                 {newsItems.map((item) => {
                   const key = item.link || item.title;
-                  const isHovered = key === hoveredNewsKey;
+                  const isActive = key === selectedNewsKey;
+                  const analysis = key ? analysisCache[key] : null;
                   return (
-                    <div
+                    <button
                       key={key}
+                      type="button"
                       className={cn(
-                        "relative px-4 py-3 border-b border-border/60 transition-colors",
-                        isHovered ? "bg-muted/70" : "hover:bg-muted/40"
+                        "w-full text-left px-4 py-3 border-b border-border/60 transition-colors",
+                        isActive ? "bg-muted/70" : "hover:bg-muted/40"
                       )}
-                      onMouseEnter={() => {
+                      onClick={() => {
                         if (!key) return;
-                        setHoveredNewsKey(key);
-                        if (!analysisCache[key]) {
-                          handleAnalyzeNews(item).catch((err) => pushStatus(err.message));
-                        }
+                        setSelectedNewsKey(key);
                       }}
-                      onMouseLeave={() => setHoveredNewsKey("")}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-semibold leading-5">{item.title}</span>
@@ -909,42 +895,18 @@ export default function Home() {
                         <span>{formatDateTime(item.published_at)}</span>
                         {item.link && <span className="truncate max-w-[220px]">{item.link}</span>}
                       </div>
-                      {isHovered && (
-                        <div className="absolute left-4 right-4 top-full mt-2 z-40 rounded-md border border-border bg-card shadow-xl p-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-muted-foreground">AI 解读</span>
-                            <Badge variant="outline" className="border-border text-muted-foreground text-[10px]">
-                              {hoveredAnalysis ? `置信度 ${formatNumber(hoveredAnalysis.confidence, 2)}` : "未分析"}
-                            </Badge>
-                          </div>
-                          <div className="mt-2 space-y-2">
-                            <div className="text-xs text-muted-foreground">摘要</div>
-                            <div className="text-sm">
-                              {hoveredAnalysis?.summary || item.summary || "分析中..."}
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 pt-2">
-                              <div className="rounded-md border border-border bg-muted/30 p-2">
-                                <div className="text-[11px] text-muted-foreground mb-1">情绪</div>
-                                <div className="text-xs font-semibold">{hoveredAnalysis?.sentiment ?? "—"}</div>
-                              </div>
-                              <div className="rounded-md border border-border bg-muted/30 p-2">
-                                <div className="text-[11px] text-muted-foreground mb-1">影响资产</div>
-                                <div className="text-xs">
-                                  {hoveredAnalysis?.impacted_assets?.length ? hoveredAnalysis.impacted_assets.join("、") : "—"}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="pt-2">
-                              <div className="text-[11px] text-muted-foreground mb-1">理由</div>
-                              <div className="text-xs">{hoveredAnalysis?.reasoning ?? "—"}</div>
-                            </div>
-                            {analysisLoading && (
-                              <div className="text-[11px] text-muted-foreground">分析中...</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Badge variant="outline" className="border-border text-muted-foreground text-[10px]">
+                          {analysis ? `置信度 ${formatNumber(analysis.confidence, 2)}` : "置信度 —"}
+                        </Badge>
+                        <Badge variant="outline" className="border-border text-muted-foreground text-[10px]">
+                          {analysis?.sentiment ?? "情绪 —"}
+                        </Badge>
+                        <Badge variant="outline" className="border-border text-muted-foreground text-[10px]">
+                          {analysis?.impacted_assets?.length ? analysis.impacted_assets.slice(0, 2).join("、") : "影响资产 —"}
+                        </Badge>
+                      </div>
+                    </button>
                   );
                 })}
                 {!newsItems.length && (
@@ -952,6 +914,38 @@ export default function Home() {
                     暂无新闻
                   </div>
                 )}
+              </div>
+            </div>
+            <div className="border border-border rounded-md bg-card shadow-sm p-5 flex-[1] min-h-[240px] overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">分析详情</span>
+                <Badge variant="outline" className="border-border text-muted-foreground text-[10px]">
+                  {selectedAnalysis ? `置信度 ${formatNumber(selectedAnalysis.confidence, 2)}` : "未分析"}
+                </Badge>
+              </div>
+              <div className="mt-3 space-y-3">
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">摘要</div>
+                  <div className="text-sm">
+                    {selectedAnalysis?.summary || selectedNews?.summary || "请选择资讯查看分析"}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-2 rounded-md border border-border bg-muted/30">
+                    <div className="text-[11px] text-muted-foreground mb-1">情绪</div>
+                    <div className="text-xs font-semibold">{selectedAnalysis?.sentiment ?? "—"}</div>
+                  </div>
+                  <div className="p-2 rounded-md border border-border bg-muted/30">
+                    <div className="text-[11px] text-muted-foreground mb-1">影响资产</div>
+                    <div className="text-xs">
+                      {selectedAnalysis?.impacted_assets?.length ? selectedAnalysis.impacted_assets.join("、") : "—"}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-muted-foreground mb-1">理由</div>
+                  <div className="text-xs">{selectedAnalysis?.reasoning ?? "—"}</div>
+                </div>
               </div>
             </div>
           </aside>
