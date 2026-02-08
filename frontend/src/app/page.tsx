@@ -247,10 +247,57 @@ export default function Home() {
   const [newsLoading, setNewsLoading] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const headerRef = useRef<HTMLElement>(null);
-  // chartRef is no longer needed in page.tsx as it is moved to FundChart component
-  // const chartRef = useRef<HTMLDivElement>(null);
 
   const selectedFund = useMemo(() => funds.find((item) => item.code === selectedCode), [funds, selectedCode]);
+
+  const [showTransactionSheet, setShowTransactionSheet] = useState(false);
+  const [transType, setTransType] = useState<"buy" | "sell">("buy");
+  const [transAmount, setTransAmount] = useState("");
+  const [transShares, setTransShares] = useState("");
+  const [transPrice, setTransPrice] = useState("");
+  const [isAfter3PM, setIsAfter3PM] = useState(false);
+  
+  useEffect(() => {
+    if (showTransactionSheet) {
+      const now = new Date();
+      // Check if after 15:00
+      const after3 = now.getHours() >= 15;
+      setIsAfter3PM(after3);
+      
+      // Auto-fill price based on best available data
+      // If < 15:00, use real-time estimate (gsz) if available
+      // If >= 15:00, usually market is closed, real-time estimate is the closing estimate
+      // Or if we have today's official NAV (rarely before night), use it
+      
+      // Priority: Real-time Estimate (gsz) > Latest History NAV
+      const estimateNav = detail?.fund_gz_nav;
+      const historyNav = navItems.length ? navItems[navItems.length-1].nav : 0;
+      
+      const bestPrice = estimateNav || historyNav;
+      if (bestPrice) {
+        setTransPrice(String(bestPrice));
+      }
+    }
+  }, [showTransactionSheet, detail, navItems]);
+
+  // Auto-calculate Shares when Amount changes (Buy)
+  useEffect(() => {
+    if (showTransactionSheet && transType === "buy" && selectedFund?.mode !== "amount") {
+       const amount = parseFloat(transAmount);
+       const price = parseFloat(transPrice);
+       if (amount > 0 && price > 0) {
+         // Fee is ignored for simplicity or could be added later
+         setTransShares((amount / price).toFixed(2));
+       }
+    }
+  }, [transAmount, transPrice, transType, showTransactionSheet, selectedFund]);
+
+  // Auto-calculate Amount when Shares changes (Sell)
+  // Actually usually we sell shares, and get amount. 
+  // But for "Reduce Position", user might input Shares.
+  
+  // chartRef is no longer needed in page.tsx as it is moved to FundChart component
+  // const chartRef = useRef<HTMLDivElement>(null);
 
   const [chartPeriod, setChartPeriod] = useState<"intraday" | "1m" | "3m" | "1y">("1m");
 
@@ -575,6 +622,68 @@ export default function Home() {
     }
   };
 
+  const handleTransaction = async () => {
+    if (!selectedFund) return;
+    
+    let finalAmount = selectedFund.amount;
+    let finalShares = selectedFund.shares;
+    let finalCost = selectedFund.cost;
+    const mode = selectedFund.mode;
+
+    const tAmount = parseFloat(transAmount) || 0;
+    const tShares = parseFloat(transShares) || 0;
+    const tPrice = parseFloat(transPrice) || 0;
+
+    if (mode === "amount") {
+       if (transType === "buy") {
+         finalAmount += tAmount;
+       } else {
+         finalAmount -= tAmount;
+       }
+       if (finalAmount < 0) finalAmount = 0;
+    } else {
+       // shares mode
+       if (transType === "buy") {
+          // New Shares = Old Shares + Transaction Shares
+          // New Cost = ((Old Shares * Old Cost) + (Transaction Shares * Transaction Price)) / New Shares
+          const costToAdd = tShares * tPrice;
+          const oldTotalCost = finalShares * finalCost;
+          const newTotalCost = oldTotalCost + costToAdd;
+          finalShares += tShares;
+          if (finalShares > 0) {
+             finalCost = newTotalCost / finalShares;
+          }
+       } else {
+          // Sell
+          // Shares decrease
+          // Cost per share remains same (FIFO/Average Cost assumption)
+          finalShares -= tShares;
+          if (finalShares < 0) finalShares = 0;
+          if (finalShares === 0) finalCost = 0;
+       }
+    }
+
+    try {
+      await updateFundAmount(selectedFund.code, {
+        amount: mode === "amount" ? finalAmount : 0,
+        mode: mode,
+        shares: mode === "shares" ? finalShares : 0,
+        cost: mode === "shares" ? finalCost : 0,
+      });
+      await loadFunds(listQuery);
+      await loadPortfolio();
+      await loadDetail(selectedFund.code);
+      setShowTransactionSheet(false);
+      pushStatus("交易已记录");
+      // Reset inputs
+      setTransAmount("");
+      setTransShares("");
+      setTransPrice("");
+    } catch (err) {
+      pushStatus(err instanceof Error ? err.message : "交易失败");
+    }
+  };
+
   const listMaxHeight = headerHeight
     ? `calc(100vh - ${Math.ceil(headerHeight)}px)`
     : "calc(100vh - 120px)";
@@ -888,6 +997,16 @@ export default function Home() {
                          </Badge>
                       )}
                     </div>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => {
+                      if (selectedFund) {
+                         // Reset and Open
+                         setTransAmount("");
+                         setTransShares("");
+                         setShowTransactionSheet(true);
+                      }
+                    }}>
+                       <Plus className="h-4 w-4" />
+                    </Button>
                     <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => selectedFund && setShowHoldingSheet(true)}>
                        <MoreHorizontal className="h-4 w-4" />
                     </Button>
@@ -1071,6 +1190,108 @@ export default function Home() {
         <div className="fixed bottom-6 right-6 bg-foreground text-background px-4 py-3 rounded-lg shadow-2xl z-50 animate-in fade-in slide-in-from-bottom-4 flex items-center gap-2">
            <div className="h-2 w-2 rounded-full bg-primary" />
            <span className="text-sm font-medium">{status}</span>
+        </div>
+      )}
+
+      {showTransactionSheet && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/20 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setShowTransactionSheet(false)}>
+          <Card className="w-full max-w-md bg-card border-border shadow-[0_8px_40px_rgba(0,0,0,0.12)] animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+            <CardHeader className="border-b border-border/40 pb-4">
+              <CardTitle>记录交易</CardTitle>
+              <CardDescription className="font-mono text-xs mt-1 flex flex-col gap-1">
+                <span>{selectedFund ? `${selectedFund.name} · ${selectedFund.code}` : "请选择基金"}</span>
+                {selectedFund && (
+                  <span className={cn("text-[10px]", isAfter3PM ? "text-primary" : "text-muted-foreground")}>
+                     当前时间 {new Date().getHours()}:{new Date().getMinutes().toString().padStart(2, '0')} · {isAfter3PM ? "今日休市 (交易归入下一交易日)" : "交易进行中 (预计今日确认)"}
+                  </span>
+                )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6 pt-6">
+              <div className="grid grid-cols-2 gap-4 p-1 bg-muted/40 rounded-lg">
+                <label className={cn("flex items-center justify-center gap-2 cursor-pointer py-2 rounded-md transition-all", transType === "buy" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:bg-background/50")}>
+                  <input type="radio" className="hidden" checked={transType === "buy"} onChange={() => setTransType("buy")} />
+                  <span className="text-sm font-medium text-destructive">加仓 (买入)</span>
+                </label>
+                <label className={cn("flex items-center justify-center gap-2 cursor-pointer py-2 rounded-md transition-all", transType === "sell" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:bg-background/50")}>
+                  <input type="radio" className="hidden" checked={transType === "sell"} onChange={() => setTransType("sell")} />
+                  <span className="text-sm font-medium text-primary">减仓 (卖出)</span>
+                </label>
+              </div>
+
+              <div className="space-y-4">
+                {selectedFund?.mode === "amount" ? (
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground">交易金额</label>
+                    <Input className="font-mono" value={transAmount} onChange={(e) => setTransAmount(e.target.value)} placeholder="请输入交易金额" />
+                  </div>
+                ) : (
+                  <>
+                    {transType === "buy" ? (
+                      // Buy Mode: Input Amount -> Auto Shares
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-muted-foreground">买入金额 (估算份额: {transShares || "0.00"})</label>
+                        <Input className="font-mono" value={transAmount} onChange={(e) => setTransAmount(e.target.value)} placeholder="请输入买入金额" autoFocus />
+                      </div>
+                    ) : (
+                      // Sell Mode: Input Shares
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs font-medium text-muted-foreground">卖出份额</label>
+                          <div className="text-[10px] text-muted-foreground flex gap-1">
+                            <span>持仓:</span>
+                            <span className="font-mono text-foreground">{selectedFund?.shares}</span>
+                            <span 
+                              className="text-primary cursor-pointer hover:underline ml-1"
+                              onClick={() => setTransShares(String(selectedFund?.shares))}
+                            >
+                              全部
+                            </span>
+                          </div>
+                        </div>
+                        <Input 
+                          className={cn("font-mono", 
+                            parseFloat(transShares) > (selectedFund?.shares || 0) && "border-destructive focus-visible:ring-destructive"
+                          )} 
+                          value={transShares} 
+                          onChange={(e) => setTransShares(e.target.value)} 
+                          placeholder="请输入卖出份额" 
+                          autoFocus 
+                        />
+                        {parseFloat(transShares) > (selectedFund?.shares || 0) && (
+                          <p className="text-[10px] text-destructive">输入份额超过当前持仓</p>
+                        )}
+                      </div>
+                    )}
+                    
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                         <label className="text-xs font-medium text-muted-foreground">成交净值 (自动获取)</label>
+                         <span className="text-[10px] text-muted-foreground opacity-70">
+                           {detail?.fund_gz_nav ? "实时估值" : "历史净值"}
+                         </span>
+                      </div>
+                      <Input className="font-mono bg-muted/30" value={transPrice} onChange={(e) => setTransPrice(e.target.value)} placeholder="净值" />
+                      <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {isAfter3PM ? "已按今日收盘估值填充，实际以明日官方净值为准" : "已按实时估值填充，实际以今晚官方净值为准"}
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <Button variant="ghost" onClick={() => setShowTransactionSheet(false)}>取消</Button>
+                <Button 
+                  onClick={handleTransaction}
+                  disabled={transType === "sell" && selectedFund?.mode === "shares" && parseFloat(transShares) > (selectedFund?.shares || 0)}
+                >
+                  确认提交
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 
