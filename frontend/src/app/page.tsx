@@ -177,7 +177,7 @@ const fetchNavHistory = (code: string, limit = 30) =>
 const searchMarketFunds = (keyword: string) =>
   fetchJson<MarketFund[]>(`/market/search?keyword=${encodeURIComponent(keyword)}`);
 
-const fetchNewsFeed = (source = "rss", limit = 20) =>
+const fetchNewsFeed = (source = "rss", limit = 200) =>
   fetchJson<NewsFeedResponse>(`/news/feed?source=${encodeURIComponent(source)}&limit=${limit}`);
 
 const analyzeNews = (payload: { title: string; content: string; source?: string | null }) =>
@@ -186,8 +186,9 @@ const analyzeNews = (payload: { title: string; content: string; source?: string 
     body: JSON.stringify(payload),
   });
 
-const AUTO_ANALYZE_INTERVAL_MS = 10 * 60 * 1000;
-const AUTO_ANALYZE_LIMIT = 6;
+const NEWS_REFRESH_INTERVAL_MS = 15 * 1000;
+const NEWS_MAX_ITEMS = 200;
+const NEWS_CLEAN_INTERVAL_MS = 10 * 60 * 1000;
 
 const formatNumber = (value?: number | null, digits = 2) => {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
@@ -236,11 +237,12 @@ export default function Home() {
   const [showHoldingSheet, setShowHoldingSheet] = useState(false);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const newsSource = "rss";
-  const [selectedNewsKey, setSelectedNewsKey] = useState<string>("");
+  const [hoveredNewsKey, setHoveredNewsKey] = useState<string>("");
   const [analysisCache, setAnalysisCache] = useState<Record<string, NewsAnalysisResponse>>({});
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [newsLoading, setNewsLoading] = useState(false);
-  const analysisCacheRef = useRef<Record<string, NewsAnalysisResponse>>({});
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const headerRef = useRef<HTMLElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
 
   const selectedFund = useMemo(() => funds.find((item) => item.code === selectedCode), [funds, selectedCode]);
@@ -325,14 +327,18 @@ export default function Home() {
   const loadNews = useCallback(async () => {
     setNewsLoading(true);
     try {
-      const res = await fetchNewsFeed(newsSource, 20);
-      const items = res.items ?? [];
+      const res = await fetchNewsFeed(newsSource, NEWS_MAX_ITEMS);
+      const items = (res.items ?? []).slice(0, NEWS_MAX_ITEMS);
       setNewsItems(items);
-      setSelectedNewsKey((current) => {
-        if (current) return current;
-        const first = items[0];
-        if (!first) return "";
-        return first.link || first.title;
+      setAnalysisCache((prev) => {
+        const next: Record<string, NewsAnalysisResponse> = {};
+        const keys = new Set(items.map((item) => item.link || item.title).filter(Boolean));
+        Object.keys(prev).forEach((key) => {
+          if (keys.has(key)) {
+            next[key] = prev[key];
+          }
+        });
+        return next;
       });
       return items;
     } finally {
@@ -357,34 +363,6 @@ export default function Home() {
     [analysisCache, newsSource]
   );
 
-  const runAutoAnalyze = useCallback(
-    async (items: NewsItem[]) => {
-      if (!items.length || analysisLoading) return;
-      const cache = analysisCacheRef.current;
-      const pending = items.filter((item) => {
-        const key = item.link || item.title;
-        return key && !cache[key];
-      });
-      if (!pending.length) return;
-      setAnalysisLoading(true);
-      try {
-        for (const item of pending.slice(0, AUTO_ANALYZE_LIMIT)) {
-          const key = item.link || item.title;
-          if (!key) continue;
-          try {
-            const content = item.summary || item.title;
-            const result = await analyzeNews({ title: item.title, content, source: item.source || newsSource });
-            setAnalysisCache((prev) => ({ ...prev, [key]: result }));
-          } catch {
-            continue;
-          }
-        }
-      } finally {
-        setAnalysisLoading(false);
-      }
-    },
-    [analysisLoading, newsSource]
-  );
 
   useEffect(() => {
     loadFunds().catch((err) => pushStatus(err.message));
@@ -402,16 +380,9 @@ export default function Home() {
   }, [selectedFund, syncInputsFromFund]);
 
   useEffect(() => {
-    analysisCacheRef.current = analysisCache;
-  }, [analysisCache]);
-
-  useEffect(() => {
-    let active = true;
     const run = async () => {
       try {
-        const items = await loadNews();
-        if (!active || !items) return;
-        await runAutoAnalyze(items);
+        await loadNews();
       } catch (err) {
         if (err instanceof Error) {
           pushStatus(err.message);
@@ -419,12 +390,44 @@ export default function Home() {
       }
     };
     run();
-    const handle = setInterval(run, AUTO_ANALYZE_INTERVAL_MS);
+    const handle = setInterval(run, NEWS_REFRESH_INTERVAL_MS);
     return () => {
-      active = false;
       clearInterval(handle);
     };
-  }, [loadNews, runAutoAnalyze, pushStatus]);
+  }, [loadNews, pushStatus]);
+
+  useEffect(() => {
+    const handle = setInterval(() => {
+      setNewsItems((prev) => prev.slice(0, NEWS_MAX_ITEMS));
+      setAnalysisCache((prev) => {
+        const keys = new Set(newsItems.map((item) => item.link || item.title).filter(Boolean));
+        const next: Record<string, NewsAnalysisResponse> = {};
+        Object.keys(prev).forEach((key) => {
+          if (keys.has(key)) {
+            next[key] = prev[key];
+          }
+        });
+        return next;
+      });
+    }, NEWS_CLEAN_INTERVAL_MS);
+    return () => clearInterval(handle);
+  }, [newsItems]);
+
+  useEffect(() => {
+    const node = headerRef.current;
+    if (!node) return;
+    const update = () => {
+      setHeaderHeight(node.getBoundingClientRect().height);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -516,19 +519,18 @@ export default function Home() {
     }
   };
 
-  const selectedNews = useMemo(() => {
-    if (!selectedNewsKey) return null;
-    return newsItems.find((item) => (item.link || item.title) === selectedNewsKey) || null;
-  }, [newsItems, selectedNewsKey]);
+  const hoveredAnalysis = useMemo(() => {
+    if (!hoveredNewsKey) return null;
+    return analysisCache[hoveredNewsKey] || null;
+  }, [analysisCache, hoveredNewsKey]);
 
-  const selectedAnalysis = useMemo(() => {
-    if (!selectedNewsKey) return null;
-    return analysisCache[selectedNewsKey] || null;
-  }, [analysisCache, selectedNewsKey]);
+  const listMaxHeight = headerHeight
+    ? `calc(100vh - ${Math.ceil(headerHeight)}px)`
+    : "calc(100vh - 120px)";
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <header className="border-b border-border bg-card shadow-sm">
+      <header ref={headerRef} className="border-b border-border bg-card shadow-sm">
         <div className="mx-auto w-full max-w-[1440px] px-6 py-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-col gap-1">
             <h1 className="text-2xl font-semibold tracking-tight">AI 基金估值平台</h1>
@@ -577,8 +579,8 @@ export default function Home() {
       </header>
 
       <div className="flex-1">
-        <div className="mx-auto w-full max-w-[1440px] px-6 py-6 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 min-h-0">
-          <aside className="flex flex-col min-h-0 rounded-md border border-border bg-card shadow-sm">
+        <div className="mx-auto w-full max-w-[1440px] px-6 py-6 grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_360px] gap-6 min-h-0">
+          <aside style={{ maxHeight: listMaxHeight }} className="flex flex-col min-h-0 rounded-md border border-border bg-card shadow-sm">
             <div className="px-4 py-3 border-b border-border flex justify-between items-center">
               <span className="font-semibold text-sm">基金列表</span>
               <Badge variant="secondary" className="bg-muted text-foreground">{funds.length}</Badge>
@@ -715,111 +717,6 @@ export default function Home() {
             <Card className="border-border">
               <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <div className="space-y-1">
-                  <CardTitle className="text-base">新闻流与 AI 解读</CardTitle>
-                  <CardDescription>仅 A 股相关，按时间排序，每 10 分钟自动分析新增资讯</CardDescription>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="h-8 border-border" onClick={() => loadNews().catch((err) => pushStatus(err.message))} disabled={newsLoading}>
-                    <RefreshCw className="h-4 w-4 mr-1" /> 刷新
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="h-8"
-                    onClick={() => selectedNews && handleAnalyzeNews(selectedNews)}
-                    disabled={!selectedNews || analysisLoading}
-                  >
-                    分析当前
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-4">
-                  <div className="border border-border rounded-md bg-muted/40 min-h-[280px]">
-                    <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                      <span className="text-sm font-medium">最新资讯</span>
-                      <Badge variant="secondary" className="bg-muted text-foreground">{newsItems.length}</Badge>
-                    </div>
-                    <div className="max-h-[360px] overflow-y-auto">
-                      {newsItems.map((item) => {
-                        const key = item.link || item.title;
-                        const isActive = key === selectedNewsKey;
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            className={cn(
-                              "w-full text-left px-4 py-3 border-b border-border/60 transition-colors",
-                              isActive ? "bg-muted/70" : "hover:bg-muted/40"
-                            )}
-                            onClick={() => {
-                              if (!key) return;
-                              setSelectedNewsKey(key);
-                              if (!analysisCache[key]) {
-                                handleAnalyzeNews(item).catch((err) => pushStatus(err.message));
-                              }
-                            }}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-sm font-semibold leading-5">{item.title}</span>
-                            </div>
-                            <div className="mt-1 text-xs text-muted-foreground flex items-center gap-3">
-                              <span>{formatDateTime(item.published_at)}</span>
-                              {item.link && <span className="truncate max-w-[240px]">{item.link}</span>}
-                            </div>
-                          </button>
-                        );
-                      })}
-                      {!newsItems.length && (
-                        <div className="h-[260px] flex items-center justify-center text-sm text-muted-foreground">
-                          暂无新闻
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="border border-border rounded-md bg-muted/40 p-4 min-h-[280px]">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">AI 解读</span>
-                      <Badge variant="outline" className="border-border text-muted-foreground">
-                        {selectedAnalysis ? `置信度 ${formatNumber(selectedAnalysis.confidence, 2)}` : "未分析"}
-                      </Badge>
-                    </div>
-                    <div className="mt-3 space-y-3">
-                      <div className="p-3 rounded-md border border-border bg-card">
-                        <div className="text-xs text-muted-foreground mb-1">摘要</div>
-                        <div className="text-sm">
-                          {selectedAnalysis?.summary || (selectedNews?.summary ?? "请选择新闻或点击分析")}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="p-3 rounded-md border border-border bg-card">
-                          <div className="text-xs text-muted-foreground mb-1">情绪</div>
-                          <div className="text-sm font-semibold">{selectedAnalysis?.sentiment ?? "—"}</div>
-                        </div>
-                        <div className="p-3 rounded-md border border-border bg-card">
-                          <div className="text-xs text-muted-foreground mb-1">影响资产</div>
-                          <div className="text-sm">
-                            {selectedAnalysis?.impacted_assets?.length ? selectedAnalysis.impacted_assets.join("、") : "—"}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="p-3 rounded-md border border-border bg-card">
-                        <div className="text-xs text-muted-foreground mb-1">理由</div>
-                        <div className="text-sm">{selectedAnalysis?.reasoning ?? "—"}</div>
-                      </div>
-                      {analysisLoading && (
-                        <div className="text-xs text-muted-foreground">分析中...</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-border">
-              <CardHeader className="flex flex-row items-center justify-between pb-3">
-                <div className="space-y-1">
                   <CardTitle className="text-base">{selectedFund ? selectedFund.name : "基金详情"}</CardTitle>
                   {selectedFund && (
                     <div className="flex items-center gap-2">
@@ -850,9 +747,9 @@ export default function Home() {
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                   {[
-                    { label: "当日涨跌", value: formatPct(detail?.estimate_pct), positive: (detail?.estimate_pct ?? 0) >= 0 },
                     { label: "估算收益", value: formatNumber(detail?.estimate_income), positive: (detail?.estimate_income ?? 0) >= 0 },
                     { label: "持有收益", value: formatNumber(detail?.total_income), positive: (detail?.total_income ?? 0) >= 0 },
+                    { label: "当日涨跌", value: formatPct(detail?.estimate_pct), positive: (detail?.estimate_pct ?? 0) >= 0 },
                     { label: "官方估值", value: formatPct(detail?.fund_gz_pct), positive: null },
                     { label: "官方净值", value: formatNumber(detail?.fund_gz_nav), positive: null },
                     { label: "净值日期", value: detail?.real_nav_date ?? "—", positive: null },
@@ -975,6 +872,89 @@ export default function Home() {
               </CardContent>
             </Card>
           </main>
+
+          <aside style={{ maxHeight: listMaxHeight }} className="flex flex-col gap-6 min-h-0">
+            <div style={{ maxHeight: listMaxHeight }} className="border border-border rounded-md bg-card shadow-sm flex flex-col min-h-0">
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <span className="text-sm font-medium">最新资讯</span>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="bg-muted text-foreground">{newsItems.length}</Badge>
+                  {newsLoading && <span className="text-xs text-muted-foreground">刷新中</span>}
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {newsItems.map((item) => {
+                  const key = item.link || item.title;
+                  const isHovered = key === hoveredNewsKey;
+                  return (
+                    <div
+                      key={key}
+                      className={cn(
+                        "relative px-4 py-3 border-b border-border/60 transition-colors",
+                        isHovered ? "bg-muted/70" : "hover:bg-muted/40"
+                      )}
+                      onMouseEnter={() => {
+                        if (!key) return;
+                        setHoveredNewsKey(key);
+                        if (!analysisCache[key]) {
+                          handleAnalyzeNews(item).catch((err) => pushStatus(err.message));
+                        }
+                      }}
+                      onMouseLeave={() => setHoveredNewsKey("")}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold leading-5">{item.title}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground flex items-center gap-3">
+                        <span>{formatDateTime(item.published_at)}</span>
+                        {item.link && <span className="truncate max-w-[220px]">{item.link}</span>}
+                      </div>
+                      {isHovered && (
+                        <div className="absolute left-4 right-4 top-full mt-2 z-40 rounded-md border border-border bg-card shadow-xl p-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">AI 解读</span>
+                            <Badge variant="outline" className="border-border text-muted-foreground text-[10px]">
+                              {hoveredAnalysis ? `置信度 ${formatNumber(hoveredAnalysis.confidence, 2)}` : "未分析"}
+                            </Badge>
+                          </div>
+                          <div className="mt-2 space-y-2">
+                            <div className="text-xs text-muted-foreground">摘要</div>
+                            <div className="text-sm">
+                              {hoveredAnalysis?.summary || item.summary || "分析中..."}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 pt-2">
+                              <div className="rounded-md border border-border bg-muted/30 p-2">
+                                <div className="text-[11px] text-muted-foreground mb-1">情绪</div>
+                                <div className="text-xs font-semibold">{hoveredAnalysis?.sentiment ?? "—"}</div>
+                              </div>
+                              <div className="rounded-md border border-border bg-muted/30 p-2">
+                                <div className="text-[11px] text-muted-foreground mb-1">影响资产</div>
+                                <div className="text-xs">
+                                  {hoveredAnalysis?.impacted_assets?.length ? hoveredAnalysis.impacted_assets.join("、") : "—"}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="pt-2">
+                              <div className="text-[11px] text-muted-foreground mb-1">理由</div>
+                              <div className="text-xs">{hoveredAnalysis?.reasoning ?? "—"}</div>
+                            </div>
+                            {analysisLoading && (
+                              <div className="text-[11px] text-muted-foreground">分析中...</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {!newsItems.length && (
+                  <div className="h-[260px] flex items-center justify-center text-sm text-muted-foreground">
+                    暂无新闻
+                  </div>
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
 
