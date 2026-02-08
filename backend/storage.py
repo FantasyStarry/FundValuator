@@ -12,6 +12,11 @@ def get_conn():
     return connect(url, row_factory=dict_row)
 
 
+def clear_news_analysis() -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM news_analysis")
+
 def init_db() -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -81,10 +86,12 @@ def init_db() -> None:
                     impacted_assets TEXT,
                     confidence REAL,
                     reasoning TEXT,
-                    updated_at TEXT
+                    updated_at TEXT,
+                    importance_score REAL DEFAULT 0
                 )
                 """
             )
+            cur.execute("ALTER TABLE news_analysis ADD COLUMN IF NOT EXISTS importance_score REAL DEFAULT 0")
 
 
 def upsert_fund(code: str, name: str, updated_at: Optional[str]) -> None:
@@ -267,20 +274,22 @@ def upsert_news_analysis(news_id: str, analysis: Dict, updated_at: Optional[str]
         analysis.get("confidence"),
         analysis.get("reasoning"),
         updated_at,
+        analysis.get("importance_score") or 0.0,
     )
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO news_analysis(news_id, summary, sentiment, impacted_assets, confidence, reasoning, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO news_analysis(news_id, summary, sentiment, impacted_assets, confidence, reasoning, updated_at, importance_score)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(news_id) DO UPDATE SET
                     summary = excluded.summary,
                     sentiment = excluded.sentiment,
                     impacted_assets = excluded.impacted_assets,
                     confidence = excluded.confidence,
                     reasoning = excluded.reasoning,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    importance_score = excluded.importance_score
                 """,
                 payload,
             )
@@ -293,25 +302,31 @@ def list_news_analysis(news_ids: List[str]) -> Dict[str, dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT news_id, summary, sentiment, impacted_assets, confidence, reasoning
+                SELECT news_id, summary, sentiment, impacted_assets, confidence, reasoning, importance_score
                 FROM news_analysis
                 WHERE news_id = ANY(%s)
                 """,
                 (news_ids,),
             )
             rows = cur.fetchall()
-    result: Dict[str, dict] = {}
+            
+    result = {}
     for row in rows:
-        assets_raw = row.get("impacted_assets") or "[]"
-        try:
-            assets = json.loads(assets_raw)
-        except json.JSONDecodeError:
-            assets = []
-        result[row["news_id"]] = {
-            "summary": row.get("summary") or "",
-            "sentiment": row.get("sentiment") or "neutral",
-            "impacted_assets": [str(item) for item in assets] if isinstance(assets, list) else [],
-            "confidence": float(row.get("confidence") or 0.0),
-            "reasoning": row.get("reasoning"),
-        }
+        # Parse impacted_assets from JSON string
+        impacted_assets_raw = row.get("impacted_assets")
+        impacted_assets = []
+        if impacted_assets_raw:
+            try:
+                impacted_assets = json.loads(impacted_assets_raw)
+            except json.JSONDecodeError:
+                pass
+        
+        # Ensure it's a list of strings
+        if not isinstance(impacted_assets, list):
+            impacted_assets = []
+            
+        row_dict = dict(row)
+        row_dict["impacted_assets"] = impacted_assets
+        result[row["news_id"]] = row_dict
+        
     return result

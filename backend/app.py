@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import datetime, date
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +19,7 @@ from .data_sources import (
     fetch_quote,
     search_market_funds,
     fetch_intraday_nav,
+    fetch_article_content,
 )
 from .config import (
     get_news_cache_ttl_sec,
@@ -39,6 +40,7 @@ from .models import (
     PortfolioOverview,
 )
 from .storage import (
+    clear_news_analysis,
     delete_fund,
     get_fund,
     get_holdings,
@@ -117,11 +119,19 @@ def _normalize_news_analysis(result: dict) -> dict:
     impacted_assets = result.get("impacted_assets") or []
     if not isinstance(impacted_assets, list):
         impacted_assets = [str(impacted_assets)]
-    confidence_raw = result.get("confidence")
+    
+    confidence = 0.0
     try:
-        confidence = float(confidence_raw)
+        confidence = float(result.get("confidence") or 0.0)
     except (TypeError, ValueError):
-        confidence = 0.0
+        pass
+        
+    importance_score = 0.0
+    try:
+        importance_score = float(result.get("importance_score") or 0.0)
+    except (TypeError, ValueError):
+        pass
+
     reasoning = result.get("reasoning")
     return {
         "summary": summary,
@@ -129,6 +139,7 @@ def _normalize_news_analysis(result: dict) -> dict:
         "impacted_assets": [str(item) for item in impacted_assets],
         "confidence": confidence,
         "reasoning": str(reasoning) if reasoning is not None else None,
+        "importance_score": importance_score,
     }
 
 
@@ -180,13 +191,16 @@ async def _redis_set_obj(key: str, value: dict, ttl_sec: int) -> None:
     await redis_client.set(key, payload, ex=ttl_sec)
 
 
-async def _load_news_analysis(items: List[dict]) -> Dict[str, dict]:
+async def _trigger_news_analysis(items: List[dict]):
+    """Background task to analyze news items."""
     items_map = { _news_item_key(item): item for item in items if _news_item_key(item) }
     news_ids = list(items_map.keys())
     if not news_ids:
-        return {}
-    analysis_map: Dict[str, dict] = {}
-    missing_ids: List[str] = []
+        return
+        
+    # Check what's already analyzed
+    analysis_map = {}
+    missing_ids = []
     if redis_client:
         for news_id in news_ids:
             cached = await _redis_get_obj(_analysis_cache_key(news_id))
@@ -196,6 +210,65 @@ async def _load_news_analysis(items: List[dict]) -> Dict[str, dict]:
                 missing_ids.append(news_id)
     else:
         missing_ids = news_ids
+        
+    if missing_ids:
+        db_map = list_news_analysis(missing_ids)
+        missing_ids = [nid for nid in missing_ids if nid not in db_map]
+        
+    if not missing_ids:
+        return
+
+    # Process missing items
+    semaphore = asyncio.Semaphore(3)
+    async def run_one(news_id: str):
+        item = items_map[news_id]
+        content = item.get("summary") or item.get("title") or ""
+        link = item.get("link")
+        
+        async with semaphore:
+            try:
+                # Try to fetch full content if link exists
+                if link and (not content or len(content) < 200):
+                     full_content = await fetch_article_content(link)
+                     if full_content and len(full_content) > 100:
+                         content = full_content
+                
+                # Truncate content if too long to avoid exceeding token limits
+                if len(content) > 5000:
+                    content = content[:5000] + "..."
+                    
+                result = await analyze_news_with_deepseek(item["title"], content, item.get("source"))
+                normalized = _normalize_news_analysis(result)
+                now_iso = datetime.now().isoformat(timespec="seconds")
+                upsert_news_analysis(news_id, normalized, now_iso)
+                if redis_client:
+                    await _redis_set_obj(_analysis_cache_key(news_id), normalized, NEWS_CACHE_TTL_SEC)
+            except Exception:
+                pass
+                
+    await asyncio.gather(*[run_one(news_id) for news_id in missing_ids], return_exceptions=True)
+
+
+async def _load_news_analysis(items: List[dict], background_tasks: Optional[BackgroundTasks] = None) -> Dict[str, dict]:
+    items_map = { _news_item_key(item): item for item in items if _news_item_key(item) }
+    news_ids = list(items_map.keys())
+    if not news_ids:
+        return {}
+    analysis_map: Dict[str, dict] = {}
+    missing_ids: List[str] = []
+    
+    # 1. Try Redis
+    if redis_client:
+        for news_id in news_ids:
+            cached = await _redis_get_obj(_analysis_cache_key(news_id))
+            if cached:
+                analysis_map[news_id] = cached
+            else:
+                missing_ids.append(news_id)
+    else:
+        missing_ids = news_ids
+        
+    # 2. Try DB
     if missing_ids:
         db_map = list_news_analysis(missing_ids)
         for news_id, analysis in db_map.items():
@@ -203,25 +276,11 @@ async def _load_news_analysis(items: List[dict]) -> Dict[str, dict]:
             if redis_client:
                 await _redis_set_obj(_analysis_cache_key(news_id), analysis, NEWS_CACHE_TTL_SEC)
         missing_ids = [news_id for news_id in missing_ids if news_id not in db_map]
-    if missing_ids:
-        semaphore = asyncio.Semaphore(3)
-        async def run_one(news_id: str):
-            item = items_map[news_id]
-            content = item.get("summary") or item.get("title") or ""
-            async with semaphore:
-                result = await analyze_news_with_deepseek(item["title"], content, item.get("source"))
-            normalized = _normalize_news_analysis(result)
-            now_iso = datetime.now().isoformat(timespec="seconds")
-            upsert_news_analysis(news_id, normalized, now_iso)
-            if redis_client:
-                await _redis_set_obj(_analysis_cache_key(news_id), normalized, NEWS_CACHE_TTL_SEC)
-            return news_id, normalized
-        results = await asyncio.gather(*[run_one(news_id) for news_id in missing_ids], return_exceptions=True)
-        for res in results:
-            if isinstance(res, Exception):
-                continue
-            news_id, analysis = res
-            analysis_map[news_id] = analysis
+
+    # 3. Trigger background analysis for missing items
+    if missing_ids and background_tasks:
+        background_tasks.add_task(_trigger_news_analysis, [items_map[nid] for nid in missing_ids])
+        
     return analysis_map
 
 
@@ -377,6 +436,18 @@ async def startup_event() -> None:
             await client.close()
         else:
             redis_client = client
+
+    # Clear old analysis to force re-analysis with full content
+    # In production this might be too aggressive, but for this update it's necessary
+    try:
+        clear_news_analysis()
+        if redis_client:
+            # Also clear redis cache pattern for analysis
+            keys = await redis_client.keys("news:analysis:*")
+            if keys:
+                await redis_client.delete(*keys)
+    except Exception:
+        pass
 
 
 @app.on_event("shutdown")
@@ -775,14 +846,36 @@ async def api_nav_history(code: str, limit: int = 30) -> NavHistoryResponse:
 
 
 @app.get("/api/news/feed", response_model=NewsFeedResponse)
-async def api_news_feed(source: str = "rss", limit: int = 20) -> NewsFeedResponse:
-    items = await _load_news_with_cache(source=source, limit=limit)
-    analysis_map = await _load_news_analysis(items)
+async def api_news_feed(background_tasks: BackgroundTasks, source: str = "rss", limit: int = 20) -> NewsFeedResponse:
+    # Fetch more items to allow for filtering
+    fetch_limit = limit * 3
+    items = await _load_news_with_cache(source=source, limit=fetch_limit)
+    analysis_map = await _load_news_analysis(items, background_tasks=background_tasks)
+    
     normalized = []
+    filtered_count = 0
+    
     for item in items:
         key = _news_item_key(item)
         analysis = analysis_map.get(key)
+        
+        # Filter logic:
+        # If analysis exists, check importance score
+        # Threshold: 4.0 (General market news and above)
+        # If analysis doesn't exist yet (background), we keep it to avoid empty feed initially
+        if analysis:
+            score = analysis.get("importance_score", 0)
+            # If we have a valid score (not 0, assuming AI returns >0 for valid), apply filter
+            # But AI might return 0 for noise.
+            # Let's say threshold is 4.0.
+            if score < 4.0:
+                filtered_count += 1
+                continue
+        
         normalized.append(NewsItem(**{**item, "analysis": analysis}))
+        if len(normalized) >= limit:
+            break
+            
     return NewsFeedResponse(source=source if source == "rss" else "rss", items=normalized)
 
 

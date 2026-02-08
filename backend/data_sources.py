@@ -7,6 +7,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, List, Optional, Tuple
 
 import httpx
+from bs4 import BeautifulSoup
 
 from .config import (
     get_deepseek_api_key,
@@ -365,6 +366,49 @@ async def fetch_news_feed(source: str = "rss", limit: int = 20) -> List[dict]:
     return items[:limit]
 
 
+async def fetch_article_content(url: str, timeout: float = 10.0) -> Optional[str]:
+    """Fetch full article content from URL."""
+    if not url:
+        return None
+    try:
+        html = await fetch_text(url, timeout=timeout)
+        soup = BeautifulSoup(html, "html.parser")
+        
+        # Remove unwanted elements
+        for script in soup(["script", "style", "nav", "header", "footer", "iframe", "noscript"]):
+            script.decompose()
+            
+        # Try to find main content
+        # This is heuristic and might need adjustment for specific sites
+        # Common classes for content
+        content_candidates = soup.find_all(class_=re.compile(r"(content|article|post|main|body|detail)", re.I))
+        
+        main_text = ""
+        
+        if content_candidates:
+            # Sort by text length to find the most likely main container
+            content_candidates.sort(key=lambda x: len(x.get_text()), reverse=True)
+            candidate = content_candidates[0]
+            
+            # Extract paragraphs
+            paragraphs = candidate.find_all("p")
+            text_parts = [p.get_text().strip() for p in paragraphs if len(p.get_text().strip()) > 10]
+            main_text = "\n".join(text_parts)
+        
+        # Fallback: if no candidates or empty text, grab all P tags from body
+        if not main_text or len(main_text) < 100:
+            body = soup.find("body")
+            if body:
+                paragraphs = body.find_all("p")
+                text_parts = [p.get_text().strip() for p in paragraphs if len(p.get_text().strip()) > 20]
+                main_text = "\n".join(text_parts)
+                
+        return main_text if len(main_text) > 50 else None
+        
+    except Exception:
+        return None
+
+
 async def analyze_news_with_deepseek(title: str, content: str, source: Optional[str] = None) -> dict:
     api_key = get_deepseek_api_key()
     if not api_key:
@@ -374,9 +418,10 @@ async def analyze_news_with_deepseek(title: str, content: str, source: Optional[
     url = f"{base_url}/v1/chat/completions"
     system_prompt = "你是金融市场研究助手。输出严格的 JSON，不要包含多余文本。"
     user_prompt = (
-        "请分析以下新闻，给出简洁总结、情绪判断、可能影响的资产或板块、置信度。"
+        "请分析以下新闻，给出简洁总结、情绪判断、可能影响的资产或板块、置信度，以及重要性评分(0-10)。"
+        "重要性评分标准：0-3为无关紧要或噪音，4-6为一般性市场消息，7-8为重要市场动向，9-10为重大突发或政策变动。"
         "返回 JSON 格式："
-        '{"summary":"...","sentiment":"negative|neutral|positive","impacted_assets":["..."],"confidence":0.0,"reasoning":"..."}'
+        '{"summary":"...","sentiment":"negative|neutral|positive","impacted_assets":["..."],"confidence":0.0,"reasoning":"...","importance_score":0.0}'
         f"\n标题: {title}\n来源: {source or ''}\n内容: {content}"
     )
     payload = {

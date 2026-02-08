@@ -124,6 +124,7 @@ type NewsAnalysisResponse = {
   impacted_assets: string[];
   confidence: number;
   reasoning?: string | null;
+  importance_score?: number | null;
 };
 
 type MarketFund = {
@@ -822,53 +823,61 @@ export default function Home() {
           <main className="flex flex-col gap-6 min-h-0 overflow-y-auto custom-scrollbar pr-1">
             {/* Overview Bento Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-               {/* Total Assets */}
-               <Card className="border-border/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300 hover:-translate-y-1">
-                 <CardContent className="p-6">
-                   <div className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
-                     <Wallet className="h-3 w-3" /> 总资产
+               <Card className="border-border/60 bg-card/80 shadow-sm transition-all duration-300 hover:shadow-[0_10px_28px_rgba(0,0,0,0.08)] hover:border-border">
+                 <CardContent className="p-5 flex flex-col gap-3">
+                   <div className="flex items-center justify-between">
+                     <div className="text-[11px] font-medium text-muted-foreground">总资产</div>
+                     <div className="h-7 w-7 rounded-md bg-muted/40 border border-border/50 flex items-center justify-center text-muted-foreground">
+                       <Wallet className="h-3.5 w-3.5" />
+                     </div>
                    </div>
-                   <div className="text-4xl font-bold tracking-tight font-mono text-foreground">
+                   <div className="text-3xl font-semibold tracking-tight font-mono text-foreground">
                      {formatNumber(portfolio?.total_amount)}
                    </div>
-                   <div className="mt-2 text-xs text-muted-foreground">
-                     实时估值
-                   </div>
+                   <div className="text-[11px] text-muted-foreground">实时估值</div>
                  </CardContent>
                </Card>
 
-               {/* Daily Income */}
-               <Card className="border-border/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300 hover:-translate-y-1">
-                 <CardContent className="p-6">
-                   <div className="text-xs font-medium text-muted-foreground mb-2">今日收益</div>
+               <Card className="border-border/60 bg-card/80 shadow-sm transition-all duration-300 hover:shadow-[0_10px_28px_rgba(0,0,0,0.08)] hover:border-border">
+                 <CardContent className="p-5 flex flex-col gap-3">
+                   <div className="flex items-center justify-between">
+                     <div className="text-[11px] font-medium text-muted-foreground">今日收益</div>
+                     <div className="h-7 w-7 rounded-md bg-muted/40 border border-border/50 flex items-center justify-center text-muted-foreground">
+                       {(portfolio?.daily_pct ?? 0) >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                     </div>
+                   </div>
                    <div className={cn(
-                     "text-4xl font-bold tracking-tight font-mono",
-                     (portfolio?.total_daily_income ?? 0) >= 0 ? "text-destructive" : "text-primary"
+                     "text-3xl font-semibold tracking-tight font-mono",
+                     (portfolio?.total_daily_income ?? 0) >= 0 ? "text-destructive" : "text-foreground"
                    )}>
                      {(portfolio?.total_daily_income ?? 0) > 0 ? "+" : ""}{formatNumber(portfolio?.total_daily_income)}
                    </div>
-                   <div className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
-                     {(portfolio?.daily_pct ?? 0) >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                     <span className={cn("font-mono font-medium", (portfolio?.daily_pct ?? 0) >= 0 ? "text-destructive" : "text-primary")}>
+                   <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                     <span className="font-mono font-medium text-foreground">
                        {(portfolio?.daily_pct ?? 0) > 0 ? "+" : ""}{formatPct(portfolio?.daily_pct, 2)}
                      </span>
+                     <span className="text-muted-foreground">当日涨跌</span>
                    </div>
                  </CardContent>
                </Card>
 
-               {/* Holding Income */}
-               <Card className="border-border/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300 hover:-translate-y-1">
-                 <CardContent className="p-6">
-                   <div className="text-xs font-medium text-muted-foreground mb-2">持有收益</div>
+               <Card className="border-border/60 bg-card/80 shadow-sm transition-all duration-300 hover:shadow-[0_10px_28px_rgba(0,0,0,0.08)] hover:border-border">
+                 <CardContent className="p-5 flex flex-col gap-3">
+                   <div className="flex items-center justify-between">
+                     <div className="text-[11px] font-medium text-muted-foreground">持有收益</div>
+                     <div className="h-7 w-7 rounded-md bg-muted/40 border border-border/50 flex items-center justify-center text-muted-foreground">
+                       <Wallet className="h-3.5 w-3.5" />
+                     </div>
+                   </div>
                    <div className={cn(
-                     "text-4xl font-bold tracking-tight font-mono",
-                     (portfolio?.total_holding_income ?? 0) >= 0 ? "text-destructive" : "text-primary"
+                     "text-3xl font-semibold tracking-tight font-mono",
+                     (portfolio?.total_holding_income ?? 0) >= 0 ? "text-destructive" : "text-foreground"
                    )}>
                      {(portfolio?.total_holding_income ?? 0) > 0 ? "+" : ""}{formatNumber(portfolio?.total_holding_income)}
                    </div>
-                   <div className="mt-2 flex gap-1">
+                   <div className="flex gap-1.5">
                      {portfolio?.official_updated && (
-                       <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 border-primary/30 text-primary bg-primary/5">
+                       <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 border-border/60 text-muted-foreground bg-muted/30">
                          已更新
                        </Badge>
                      )}
@@ -876,16 +885,15 @@ export default function Home() {
                  </CardContent>
                </Card>
 
-               {/* Status / Meta */}
-               <Card className="border-border/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300 hover:-translate-y-1 bg-muted/20">
-                 <CardContent className="p-5 flex flex-col justify-between h-full">
+               <Card className="border-border/60 bg-muted/20 shadow-sm transition-all duration-300 hover:shadow-[0_10px_28px_rgba(0,0,0,0.08)] hover:border-border">
+                 <CardContent className="p-5 flex flex-col justify-between h-full gap-3">
                     <div className="flex flex-col gap-2">
-                       <div className="text-xs text-muted-foreground">数据来源</div>
-                       <div className="font-medium text-sm">{resolveSourceLabel(portfolio?.used_source, portfolio?.holiday_mode)}</div>
+                       <div className="text-[11px] font-medium text-muted-foreground">数据来源</div>
+                       <div className="font-medium text-sm text-foreground">{resolveSourceLabel(portfolio?.used_source, portfolio?.holiday_mode)}</div>
                     </div>
                     {portfolio?.transition_progress !== undefined && portfolio?.transition_progress !== null && portfolio.transition_progress < 1 && (
-                      <div className="w-full bg-muted rounded-full h-1.5 mt-2 overflow-hidden">
-                        <div className="bg-primary h-full rounded-full transition-all duration-500" style={{ width: `${portfolio.transition_progress * 100}%` }} />
+                      <div className="w-full bg-muted/60 rounded-full h-1.5 mt-2 overflow-hidden">
+                        <div className="bg-foreground/70 h-full rounded-full transition-all duration-500" style={{ width: `${portfolio.transition_progress * 100}%` }} />
                       </div>
                     )}
                  </CardContent>
@@ -1129,6 +1137,8 @@ export default function Home() {
                          const key = item.link || item.title;
                          const isActive = key === selectedNewsKey;
                          const analysis = key ? analysisCache[key] : null;
+                         const rawScore = analysis?.importance_score;
+                         const normalizedScore = typeof rawScore === "number" ? rawScore : rawScore ? Number(rawScore) : null;
                          
                          return (
                            <div key={idx} className="relative group pl-6">
@@ -1158,6 +1168,15 @@ export default function Home() {
                                        <Badge variant="secondary" className="text-[10px] h-5 px-1.5 font-normal bg-background border border-border/60 text-muted-foreground">
                                           {analysis.sentiment}
                                        </Badge>
+                                       {normalizedScore !== null && !Number.isNaN(normalizedScore) && (
+                                         <Badge variant="secondary" className={cn("text-[10px] h-5 px-1.5 font-normal border font-mono", 
+                                            normalizedScore >= 9 ? "bg-destructive/10 text-destructive border-destructive/20" :
+                                            normalizedScore >= 7 ? "bg-emerald-900/10 text-emerald-900 border-emerald-900/20" :
+                                            "bg-muted/30 text-muted-foreground border-border/60"
+                                         )}>
+                                            评分 {normalizedScore.toFixed(1)}
+                                         </Badge>
+                                       )}
                                        {analysis.impacted_assets.slice(0, 1).map(asset => (
                                           <Badge key={asset} variant="secondary" className="text-[10px] h-5 px-1.5 font-normal bg-background border border-border/60 text-muted-foreground">
                                              {asset}
@@ -1169,6 +1188,14 @@ export default function Home() {
 
                                 {isActive && (
                                    <div className="mt-3 text-xs text-muted-foreground/90 bg-background/50 p-3 rounded border border-border/40 animate-in fade-in slide-in-from-top-1 duration-200">
+                                      <div className="flex justify-between items-center mb-2 pb-2 border-b border-border/40">
+                                         <span className="font-semibold text-foreground">AI 摘要</span>
+                                         {normalizedScore !== null && !Number.isNaN(normalizedScore) && (
+                                             <span className="font-mono text-[10px] text-muted-foreground">
+                                                评分 {normalizedScore.toFixed(1)}/10
+                                             </span>
+                                         )}
+                                      </div>
                                       {analysis?.summary || item.summary || "暂无详细分析"}
                                    </div>
                                 )}
