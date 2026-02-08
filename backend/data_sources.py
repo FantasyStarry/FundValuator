@@ -1,5 +1,6 @@
 import json
 import re
+import asyncio
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -102,9 +103,29 @@ def _parse_nav_rows(html: str) -> List[dict]:
 
 
 async def fetch_nav_history(code: str, limit: int = 30) -> List[dict]:
-    url = f"https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code={code}&page=1&per={limit}"
-    text = await fetch_text(url)
-    return _parse_nav_rows(text)
+    per_page = 40
+    if limit <= per_page:
+        url = f"https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code={code}&page=1&per={limit}"
+        text = await fetch_text(url)
+        return _parse_nav_rows(text)
+    
+    # Calculate pages needed
+    num_pages = (limit + per_page - 1) // per_page
+    
+    # Create tasks
+    tasks = []
+    for page in range(1, num_pages + 1):
+        url = f"https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code={code}&page={page}&per={per_page}"
+        tasks.append(fetch_text(url))
+        
+    results = await asyncio.gather(*tasks)
+    
+    all_items = []
+    for text in results:
+        items = _parse_nav_rows(text)
+        all_items.extend(items)
+        
+    return all_items[:limit]
 
 
 def _parse_holdings_content(content: str) -> List[dict]:
@@ -245,6 +266,60 @@ async def search_market_funds(keyword: str) -> List[dict]:
     except Exception:
         return []
 
+
+async def fetch_intraday_nav(code: str) -> List[dict]:
+    # Try to fetch real-time intraday estimation curve
+    # Use FundMNTime API which is commonly used by mobile apps
+    url = f"https://fundmobapi.eastmoney.com/FundMNewApi/FundMNTime?FCODE={code}&deviceid=1&plat=Android&product=EFund&version=6.3.8&GTOKEN=99B8Z1"
+    
+    try:
+        text = await fetch_text(url, timeout=5.0)
+        data = json.loads(text)
+        
+        # Response structure: { "Datas": [ "0930,1.1234,1.120,0.05%", ... ], "Expansion": ... }
+        if not isinstance(data, dict) or "Datas" not in data:
+            return []
+            
+        datas = data.get("Datas", [])
+        if not datas or not isinstance(datas, list):
+            return []
+            
+        items = []
+        for row in datas:
+            # Format: "Time,NAV,Price,Rate" (e.g. "0930,1.0667,1.066,0.00%")
+            # Some versions might be different, let's parse robustly
+            parts = row.split(",")
+            if len(parts) < 2:
+                continue
+                
+            time_str = parts[0] # "0930" or "10:30"
+            if len(time_str) == 4 and ":" not in time_str:
+                time_str = f"{time_str[:2]}:{time_str[2:]}"
+                
+            try:
+                nav = float(parts[1])
+                # parts[3] usually contains rate like "0.15%"
+                pct = 0.0
+                if len(parts) > 3:
+                    pct_str = parts[3].replace("%", "")
+                    if pct_str:
+                        pct = float(pct_str)
+                        
+                items.append({
+                    "date": time_str,
+                    "nav": nav,
+                    "daily_pct": pct
+                })
+            except (ValueError, IndexError):
+                continue
+                
+        return items
+        
+    except Exception:
+        # If API fails, return empty list
+        pass
+
+    return [] 
 
 async def fetch_news_rss(url: str, limit: int = 20) -> List[dict]:
     text = await fetch_text(url, timeout=8.0)

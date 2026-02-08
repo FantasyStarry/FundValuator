@@ -18,6 +18,7 @@ from .data_sources import (
     fetch_news_feed,
     fetch_quote,
     search_market_funds,
+    fetch_intraday_nav,
 )
 from .config import (
     get_news_cache_ttl_sec,
@@ -762,6 +763,11 @@ async def api_nav_history(code: str, limit: int = 30) -> NavHistoryResponse:
     if not fund:
         raise HTTPException(status_code=404, detail="基金不存在")
     try:
+        if limit == 0:  # Convention for intraday
+             items = await fetch_intraday_nav(code)
+             # If empty, frontend will handle "coming soon"
+             return NavHistoryResponse(code=code, name=fund["name"], items=items)
+        
         items = await fetch_nav_history(code, limit=limit)
         return NavHistoryResponse(code=code, name=fund["name"], items=items)
     except Exception:
