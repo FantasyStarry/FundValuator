@@ -253,27 +253,27 @@ export default function Home() {
       xAxis: {
         type: "category",
         data: navItems.map((item) => item.date),
-        axisLabel: { color: "rgba(214, 219, 216, 0.7)" },
-        axisLine: { lineStyle: { color: "rgba(255, 255, 255, 0.2)" } },
+        axisLabel: { color: "rgba(107, 98, 88, 0.75)" },
+        axisLine: { lineStyle: { color: "rgba(222, 214, 200, 0.9)" } },
       },
       yAxis: {
         type: "value",
-        axisLabel: { color: "rgba(214, 219, 216, 0.7)" },
-        splitLine: { lineStyle: { color: "rgba(255, 255, 255, 0.08)" } },
+        axisLabel: { color: "rgba(107, 98, 88, 0.75)" },
+        splitLine: { lineStyle: { color: "rgba(235, 227, 213, 0.9)" } },
       },
       tooltip: {
         trigger: "axis",
-        backgroundColor: "rgba(0, 0, 0, 0.85)",
-        borderColor: "rgba(255, 255, 255, 0.12)",
-        textStyle: { color: "#ffffff" },
+        backgroundColor: "rgba(31, 31, 28, 0.92)",
+        borderColor: "rgba(222, 214, 200, 0.6)",
+        textStyle: { color: "#f6f1e7" },
       },
       series: [
         {
           data: navItems.map((item) => item.nav),
           type: "line",
           smooth: true,
-          lineStyle: { color: "#7fa38b", width: 2 },
-          areaStyle: { color: "rgba(127, 163, 139, 0.18)" },
+          lineStyle: { color: "#2f5b43", width: 2 },
+          areaStyle: { color: "rgba(47, 91, 67, 0.18)" },
           symbol: "none",
         },
       ],
@@ -528,27 +528,27 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto w-full max-w-[1440px] px-6 py-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <header className="border-b border-border bg-card shadow-sm">
+        <div className="mx-auto w-full max-w-[1440px] px-6 py-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-col gap-1">
-            <h1 className="text-xl font-semibold tracking-tight">AI 基金估值平台</h1>
-            <p className="text-xs text-muted-foreground">实时估值与官方对账</p>
+            <h1 className="text-2xl font-semibold tracking-tight">AI 基金估值平台</h1>
+            <p className="text-sm text-muted-foreground">实时估值与官方对账</p>
           </div>
           <div className="flex flex-wrap items-center gap-3 justify-between lg:justify-end">
             <div className="relative w-full max-w-[520px] lg:w-[360px]">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                className="pl-9 h-9"
+                className="pl-9 h-10"
                 placeholder="搜索并添加基金..."
                 value={marketQuery}
                 onChange={(e) => setMarketQuery(e.target.value)}
               />
               {marketQuery && (
-                <div className="absolute top-11 left-0 right-0 bg-popover border border-border rounded-md p-2 flex flex-col gap-2 z-50 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                <div className="absolute top-11 left-0 right-0 bg-popover border border-border rounded-md p-2 flex flex-col gap-2 z-50 shadow-xl animate-in fade-in zoom-in-95 duration-200">
                   {marketResults.slice(0, 6).map((item) => (
                     <div
                       key={item.code}
-                      className="flex justify-between items-center gap-3 p-2 rounded-md transition-colors hover:bg-muted/50"
+                      className="flex justify-between items-center gap-3 p-2 rounded-md transition-colors hover:bg-muted/60"
                     >
                       <div className="min-w-0">
                         <div className="text-sm font-semibold truncate">{item.name}</div>
@@ -564,11 +564,11 @@ export default function Home() {
               )}
             </div>
 
-            <Badge variant="outline" className="gap-1 border-border bg-muted/40 text-foreground">
+            <Badge variant="outline" className="gap-1 border-border bg-muted/50 text-foreground">
               <Clock className="h-3 w-3" /> 组合更新：{portfolio?.update_time ?? "—"}
             </Badge>
             {selectedFund && (
-              <Badge variant="outline" className="gap-1 border-border bg-muted/40 text-foreground">
+              <Badge variant="outline" className="gap-1 border-border bg-muted/50 text-foreground">
                 当前：{selectedFund.name}
               </Badge>
             )}
@@ -578,7 +578,7 @@ export default function Home() {
 
       <div className="flex-1">
         <div className="mx-auto w-full max-w-[1440px] px-6 py-6 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 min-h-0">
-          <aside className="flex flex-col min-h-0 rounded-md border border-border bg-card">
+          <aside className="flex flex-col min-h-0 rounded-md border border-border bg-card shadow-sm">
             <div className="px-4 py-3 border-b border-border flex justify-between items-center">
               <span className="font-semibold text-sm">基金列表</span>
               <Badge variant="secondary" className="bg-muted text-foreground">{funds.length}</Badge>
@@ -588,7 +588,7 @@ export default function Home() {
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  className="pl-9 h-9 text-sm"
+                  className="pl-9 h-10 text-sm"
                   placeholder="筛选列表..."
                   value={listQuery}
                   onChange={(e) => setListQuery(e.target.value)}
@@ -606,8 +606,8 @@ export default function Home() {
                     className={cn(
                       "p-3 rounded-md cursor-pointer border transition-colors",
                       selectedCode === fund.code
-                        ? "bg-secondary border-primary/50"
-                        : "border-transparent hover:border-border hover:bg-muted/40"
+                        ? "bg-secondary border-primary/40"
+                        : "border-transparent hover:border-border hover:bg-muted/60"
                     )}
                     onClick={() => setSelectedCode(fund.code)}
                   >
@@ -616,7 +616,7 @@ export default function Home() {
                       <span
                         className={cn(
                           "text-sm font-semibold",
-                          isPositive ? "text-[#a06b6b]" : "text-[#7b9b84]"
+                          isPositive ? "text-[#8b2f2f]" : "text-[#1f4d3a]"
                         )}
                       >
                         {estimate !== null ? `${estimate.toFixed(2)}%` : "—"}
@@ -629,7 +629,7 @@ export default function Home() {
               {!funds.length && <div className="text-center text-muted-foreground text-sm py-8">暂无数据</div>}
             </div>
 
-            <div className="p-4 border-t border-border bg-secondary/60">
+            <div className="p-4 border-t border-border bg-secondary/70">
               <Button variant="outline" className="w-full border-border" onClick={() => selectedFund && setShowHoldingSheet(true)}>
                 <Wallet className="h-4 w-4 mr-2" /> 更新持仓
               </Button>
@@ -640,43 +640,43 @@ export default function Home() {
             <Card className="border-border">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-primary" /> 投资组合总览
+                  <Activity className="h-4 w-4 text-accent" /> 投资组合总览
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="p-3 rounded-md bg-secondary/60 border border-border">
+                  <div className="p-3 rounded-md bg-secondary/70 border border-border">
                     <div className="text-xs text-muted-foreground mb-1">总资产</div>
                     <div className="text-2xl font-bold tracking-tight">{formatNumber(portfolio?.total_amount)}</div>
                   </div>
-                  <div className="p-3 rounded-md bg-secondary/60 border border-border">
+                  <div className="p-3 rounded-md bg-secondary/70 border border-border">
                     <div className="text-xs text-muted-foreground mb-1">今日收益</div>
                     <div
                       className={cn(
                         "text-2xl font-bold tracking-tight",
-                        (portfolio?.total_daily_income ?? 0) >= 0 ? "text-[#a06b6b]" : "text-[#7b9b84]"
+                        (portfolio?.total_daily_income ?? 0) >= 0 ? "text-[#8b2f2f]" : "text-[#1f4d3a]"
                       )}
                     >
                       {formatNumber(portfolio?.total_daily_income)}
                     </div>
                   </div>
-                  <div className="p-3 rounded-md bg-secondary/60 border border-border">
+                  <div className="p-3 rounded-md bg-secondary/70 border border-border">
                     <div className="text-xs text-muted-foreground mb-1">持有收益</div>
                     <div
                       className={cn(
                         "text-2xl font-bold tracking-tight",
-                        (portfolio?.total_holding_income ?? 0) >= 0 ? "text-[#a06b6b]" : "text-[#7b9b84]"
+                        (portfolio?.total_holding_income ?? 0) >= 0 ? "text-[#8b2f2f]" : "text-[#1f4d3a]"
                       )}
                     >
                       {formatNumber(portfolio?.total_holding_income)}
                     </div>
                   </div>
-                  <div className="p-3 rounded-md bg-secondary/60 border border-border">
+                  <div className="p-3 rounded-md bg-secondary/70 border border-border">
                     <div className="text-xs text-muted-foreground mb-1">今日涨跌</div>
                     <div
                       className={cn(
                         "text-2xl font-bold tracking-tight flex items-center gap-1",
-                        (portfolio?.daily_pct ?? 0) >= 0 ? "text-[#a06b6b]" : "text-[#7b9b84]"
+                        (portfolio?.daily_pct ?? 0) >= 0 ? "text-[#8b2f2f]" : "text-[#1f4d3a]"
                       )}
                     >
                       {(portfolio?.daily_pct ?? 0) >= 0 ? (
@@ -690,21 +690,21 @@ export default function Home() {
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Badge variant="outline" className="border-border bg-muted/40 text-foreground">
+                  <Badge variant="outline" className="border-border bg-muted/50 text-foreground">
                     来源：{resolveSourceLabel(portfolio?.used_source, portfolio?.holiday_mode)}
                   </Badge>
-                  <Badge variant="outline" className="border-border bg-muted/40 text-foreground">
+                  <Badge variant="outline" className="border-border bg-muted/50 text-foreground">
                     日期：{portfolio?.used_date ?? "—"}
                   </Badge>
                   {portfolio?.official_updated && (
-                    <Badge variant="outline" className="border-border bg-secondary/70 text-[#cdd6cd]">
+                    <Badge variant="outline" className="border-border bg-secondary/80 text-foreground">
                       官方已更新
                     </Badge>
                   )}
                   {portfolio?.transition_progress !== undefined &&
                     portfolio?.transition_progress !== null &&
                     portfolio.transition_progress < 1 && (
-                      <Badge variant="outline" className="border-border bg-muted/60 text-muted-foreground">
+                      <Badge variant="outline" className="border-border bg-muted/70 text-muted-foreground">
                         过渡 {Math.round(portfolio.transition_progress * 100)}%
                       </Badge>
                     )}
@@ -735,7 +735,7 @@ export default function Home() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-4">
-                  <div className="border border-border rounded-md bg-secondary/40 min-h-[280px]">
+                  <div className="border border-border rounded-md bg-muted/40 min-h-[280px]">
                     <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                       <span className="text-sm font-medium">最新资讯</span>
                       <Badge variant="secondary" className="bg-muted text-foreground">{newsItems.length}</Badge>
@@ -750,7 +750,7 @@ export default function Home() {
                             type="button"
                             className={cn(
                               "w-full text-left px-4 py-3 border-b border-border/60 transition-colors",
-                              isActive ? "bg-muted/60" : "hover:bg-muted/30"
+                              isActive ? "bg-muted/70" : "hover:bg-muted/40"
                             )}
                             onClick={() => {
                               if (!key) return;
@@ -778,7 +778,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="border border-border rounded-md bg-secondary/40 p-4 min-h-[280px]">
+                  <div className="border border-border rounded-md bg-muted/40 p-4 min-h-[280px]">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">AI 解读</span>
                       <Badge variant="outline" className="border-border text-muted-foreground">
@@ -857,15 +857,15 @@ export default function Home() {
                     { label: "官方净值", value: formatNumber(detail?.fund_gz_nav), positive: null },
                     { label: "净值日期", value: detail?.real_nav_date ?? "—", positive: null },
                   ].map((item, i) => (
-                    <div key={i} className="p-3 rounded-md bg-secondary/60 border border-border">
+                    <div key={i} className="p-3 rounded-md bg-secondary/70 border border-border">
                       <div className="text-xs text-muted-foreground mb-1">{item.label}</div>
                       <div
                         className={cn(
                           "text-lg font-semibold",
                           item.positive === true
-                            ? "text-[#a06b6b]"
+                            ? "text-[#8b2f2f]"
                             : item.positive === false
-                              ? "text-[#7b9b84]"
+                              ? "text-[#1f4d3a]"
                               : ""
                         )}
                       >
@@ -903,24 +903,24 @@ export default function Home() {
                 <CardContent>
                   {selectedFund ? (
                     <div className="grid grid-cols-1 gap-4">
-                      <div className="p-4 rounded-md bg-secondary/60 border border-border flex justify-between items-center">
+                      <div className="p-4 rounded-md bg-secondary/70 border border-border flex justify-between items-center">
                         <span className="text-sm text-muted-foreground">持有方式</span>
                         <Badge variant="secondary" className="bg-muted text-foreground">
                           {selectedFund.mode === "amount" ? "金额" : "份额"}
                         </Badge>
                       </div>
                       {selectedFund.mode === "amount" ? (
-                        <div className="p-4 rounded-md bg-secondary/60 border border-border flex justify-between items-center">
+                        <div className="p-4 rounded-md bg-secondary/70 border border-border flex justify-between items-center">
                           <span className="text-sm text-muted-foreground">持有金额</span>
                           <span className="text-lg font-semibold font-mono">{formatNumber(selectedFund.amount)}</span>
                         </div>
                       ) : (
                         <>
-                          <div className="p-4 rounded-md bg-secondary/60 border border-border flex justify-between items-center">
+                          <div className="p-4 rounded-md bg-secondary/70 border border-border flex justify-between items-center">
                             <span className="text-sm text-muted-foreground">持有份额</span>
                             <span className="text-lg font-semibold font-mono">{formatNumber(selectedFund.shares, 2)}</span>
                           </div>
-                          <div className="p-4 rounded-md bg-secondary/60 border border-border flex justify-between items-center">
+                          <div className="p-4 rounded-md bg-secondary/70 border border-border flex justify-between items-center">
                             <span className="text-sm text-muted-foreground">单位成本</span>
                             <span className="text-lg font-semibold font-mono">{formatNumber(selectedFund.cost, 4)}</span>
                           </div>
@@ -960,7 +960,7 @@ export default function Home() {
                           <TableCell
                             className={cn(
                               "text-right font-semibold",
-                              item.change_pct >= 0 ? "text-[#a06b6b]" : "text-[#7b9b84]"
+                              item.change_pct >= 0 ? "text-[#8b2f2f]" : "text-[#1f4d3a]"
                             )}
                           >
                             {formatPct(item.change_pct)}

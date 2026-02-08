@@ -3,37 +3,37 @@
 
 @layer base {
   :root {
-    --background: #151714;
-    --foreground: #f4f2ec;
+    --background: #f6f1e7;
+    --foreground: #1f1f1c;
 
-    --card: #20241f;
-    --card-foreground: #f4f2ec;
+    --card: #ffffff;
+    --card-foreground: #1f1f1c;
  
-    --popover: #232822;
-    --popover-foreground: #f4f2ec;
+    --popover: #ffffff;
+    --popover-foreground: #1f1f1c;
  
-    --primary: #4b7a5a;
-    --primary-foreground: #f6f4ee;
+    --primary: #1f4d3a;
+    --primary-foreground: #f6f1e7;
  
-    --secondary: #2b302a;
-    --secondary-foreground: #eae7df;
+    --secondary: #efe6d8;
+    --secondary-foreground: #2d2a24;
  
-    --muted: #313831;
-    --muted-foreground: #b2b8ae;
+    --muted: #f2ece1;
+    --muted-foreground: #6b6258;
  
-    --accent: #5d7f63;
-    --accent-foreground: #f6f4ee;
+    --accent: #2f5b43;
+    --accent-foreground: #f6f1e7;
  
     --destructive: #8b2f2f;
-    --destructive-foreground: #f6f4ee;
+    --destructive-foreground: #f6f1e7;
 
-    --border: #3a423a;
-    --input: #242a24;
-    --ring: rgba(75, 122, 90, 0.55);
+    --border: #ded6c8;
+    --input: #ffffff;
+    --ring: rgba(31, 77, 58, 0.35);
  
     --radius: 10px;
     
-    --shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+    --shadow: 0 12px 26px rgba(31, 26, 18, 0.12);
   }
 }
 
@@ -64,13 +64,13 @@
 .orb-1 {
   top: -120px;
   left: -80px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .orb-2 {
   bottom: -140px;
   right: -100px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .glass-panel {

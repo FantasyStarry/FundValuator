@@ -29,6 +29,15 @@ def _get_nested(config: Dict[str, Any], keys: List[str]) -> Optional[str]:
     return str(cursor)
 
 
+def _get_int_value(value: Optional[str], default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def get_deepseek_api_key() -> Optional[str]:
     config = _load_local_config()
     return os.getenv("DEEPSEEK_API_KEY") or _get_nested(config, ["deepseek", "api_key"])
@@ -81,3 +90,27 @@ def get_news_keywords() -> List[str]:
         "回购",
         "分红",
     ]
+
+
+def get_redis_url() -> Optional[str]:
+    config = _load_local_config()
+    return os.getenv("REDIS_URL") or _get_nested(config, ["redis", "url"])
+
+
+def get_news_cache_ttl_sec() -> int:
+    config = _load_local_config()
+    return _get_int_value(os.getenv("NEWS_CACHE_TTL_SEC") or _get_nested(config, ["news", "cache_ttl_sec"]), 300)
+
+
+def get_news_refresh_interval_sec() -> int:
+    config = _load_local_config()
+    return _get_int_value(os.getenv("NEWS_REFRESH_INTERVAL_SEC") or _get_nested(config, ["news", "refresh_interval_sec"]), 60)
+
+
+def get_database_url() -> Optional[str]:
+    config = _load_local_config()
+    return (
+        os.getenv("DATABASE_URL")
+        or _get_nested(config, ["database", "url"])
+        or _get_nested(config, ["postgres", "url"])
+    )

@@ -1,12 +1,14 @@
 from pathlib import Path
 from typing import List, Optional, Tuple
 import asyncio
+import json
 from datetime import datetime, date
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from redis.asyncio import Redis
 
 from .data_sources import (
     analyze_news_with_deepseek,
@@ -16,6 +18,11 @@ from .data_sources import (
     fetch_news_feed,
     fetch_quote,
     search_market_funds,
+)
+from .config import (
+    get_news_cache_ttl_sec,
+    get_news_refresh_interval_sec,
+    get_redis_url,
 )
 from .models import (
     EstimateComponent,
@@ -35,10 +42,12 @@ from .storage import (
     get_fund,
     get_holdings,
     init_db,
+    list_news_items,
     list_funds,
     replace_holdings,
     update_fund_source_state,
     update_fund_holding,
+    upsert_news_items,
     upsert_fund,
 )
 
@@ -57,6 +66,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+NEWS_CACHE_TTL_SEC = get_news_cache_ttl_sec()
+NEWS_REFRESH_INTERVAL_SEC = get_news_refresh_interval_sec()
+redis_client: Optional[Redis] = None
+
 
 def _extract_date(value: Optional[str]) -> Optional[str]:
     if not value:
@@ -71,6 +84,94 @@ def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _news_item_key(item: dict) -> str:
+    return str(item.get("link") or item.get("title") or "").strip()
+
+
+def _normalize_news_items(items: List[dict], source: str) -> List[dict]:
+    normalized = []
+    for item in items:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        normalized.append(
+            {
+                "title": title,
+                "link": item.get("link") or None,
+                "published_at": item.get("published_at") or None,
+                "summary": item.get("summary") or None,
+                "source": source,
+            }
+        )
+    return normalized
+
+
+async def _redis_get_json(key: str) -> Optional[List[dict]]:
+    if not redis_client:
+        return None
+    raw = await redis_client.get(key)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, list):
+        return None
+    return data
+
+
+async def _redis_set_json(key: str, value: List[dict], ttl_sec: int) -> None:
+    if not redis_client:
+        return
+    payload = json.dumps(value, ensure_ascii=False)
+    await redis_client.set(key, payload, ex=ttl_sec)
+
+
+async def _load_news_with_cache(source: str, limit: int) -> List[dict]:
+    if source != "rss":
+        source = "rss"
+    cache_key = f"news:feed:{source}:{limit}"
+    last_check_key = f"news:last_check:{source}"
+    now_ts = int(datetime.now().timestamp())
+
+    if redis_client:
+        cached = await _redis_get_json(cache_key)
+        if cached:
+            last_check_raw = await redis_client.get(last_check_key)
+            last_check = 0
+            if last_check_raw:
+                try:
+                    last_check = int(last_check_raw)
+                except (TypeError, ValueError):
+                    last_check = 0
+            if last_check and now_ts - last_check < NEWS_REFRESH_INTERVAL_SEC:
+                return cached
+            latest = await fetch_news_feed(source=source, limit=1)
+            latest_normalized = _normalize_news_items(latest, source)
+            cached_latest = cached[0] if cached else None
+            if cached_latest and latest_normalized:
+                cached_key = _news_item_key(cached_latest)
+                latest_key = _news_item_key(latest_normalized[0])
+                if cached_key and latest_key and cached_key == latest_key:
+                    await redis_client.set(last_check_key, str(now_ts), ex=NEWS_CACHE_TTL_SEC)
+                    return cached
+
+    items = await fetch_news_feed(source=source, limit=limit)
+    normalized = _normalize_news_items(items, source)
+    if normalized:
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        upsert_news_items(
+            [{**item, "updated_at": now_iso} for item in normalized],
+            source,
+        )
+        if redis_client:
+            await _redis_set_json(cache_key, normalized, NEWS_CACHE_TTL_SEC)
+            await redis_client.set(last_check_key, str(now_ts), ex=NEWS_CACHE_TTL_SEC)
+        return normalized
+    return list_news_items(source, limit)
 
 
 def _resolve_used_pct(
@@ -171,6 +272,22 @@ def _resolve_used_pct(
 @app.on_event("startup")
 async def startup_event() -> None:
     init_db()
+    global redis_client
+    redis_url = get_redis_url()
+    if redis_url:
+        client = Redis.from_url(redis_url, decode_responses=True)
+        try:
+            await client.ping()
+        except Exception:
+            await client.close()
+        else:
+            redis_client = client
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    if redis_client:
+        await redis_client.close()
 
 
 @app.get("/")
@@ -559,9 +676,9 @@ async def api_nav_history(code: str, limit: int = 30) -> NavHistoryResponse:
 
 @app.get("/api/news/feed", response_model=NewsFeedResponse)
 async def api_news_feed(source: str = "rss", limit: int = 20) -> NewsFeedResponse:
-    items = await fetch_news_feed(source=source, limit=limit)
-    normalized = [NewsItem(source=source, **item) for item in items]
-    return NewsFeedResponse(source=source, items=normalized)
+    items = await _load_news_with_cache(source=source, limit=limit)
+    normalized = [NewsItem(**item) for item in items]
+    return NewsFeedResponse(source=source if source == "rss" else "rss", items=normalized)
 
 
 @app.post("/api/ai/news/analyze", response_model=NewsAnalysisResponse)
