@@ -28,7 +28,7 @@
 
 ### 🤖 AI 新闻影响分析
 - 实时抓取财经新闻 RSS 流
-- 利用 DeepSeek AI 进行新闻解读
+- 灵活选择 AI 模型：支持本地部署 (Ollama) 或云端 API (DeepSeek、ChatGPT、Gemini、Grok 等)
 - 输出情感分析、影响资产、重要性评分
 - 按重要性自动过滤低价值新闻
 
@@ -50,7 +50,7 @@
 │                        Backend                               │
 │  FastAPI + Python 3.10+                                     │
 │  ├── 数据采集层 (AkShare / 新浪 / 腾讯 / 东方财富)            │
-│  ├── AI 分析层 (DeepSeek API)                               │
+│  ├── AI 分析层 (支持多种 AI 模型 API)                        │
 │  └── 业务逻辑层 (估值计算 / 持仓管理)                         │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -161,9 +161,9 @@ docker-compose logs -f
 
 | 变量名 | 说明 | 默认值 | 必需 |
 |--------|------|--------|------|
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | - | ✅ |
-| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com` | ❌ |
-| `DEEPSEEK_MODEL` | 使用的模型 | `deepseek-chat` | ❌ |
+| `DEEPSEEK_API_KEY` | AI 模型 API 密钥 (支持 DeepSeek/OpenAI/Gemini 等) | - | ✅ |
+| `DEEPSEEK_BASE_URL` | AI 模型 API 地址 | `https://api.deepseek.com` | ❌ |
+| `DEEPSEEK_MODEL` | 使用的模型名称 | `deepseek-chat` | ❌ |
 | `REDIS_URL` | Redis 连接地址 | - | ❌ |
 | `NEWS_RSS_URL` | 新闻 RSS 源地址 | 财联社 RSS | ❌ |
 | `NEWS_CACHE_TTL_SEC` | 新闻缓存时间(秒) | `3600` | ❌ |

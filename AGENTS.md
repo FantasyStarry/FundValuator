@@ -61,3 +61,31 @@ If a generated result violates any rule above:
 - Regenerate the output
 - Remove forbidden elements
 - Re-align with enterprise UI standards
+
+---
+
+## Documentation Sync Rules
+
+### README Synchronization
+
+When completing a new feature or significant change to the project:
+
+1. **Update README.md** to reflect the changes:
+   - Add new features to the feature list
+   - Update API documentation if endpoints changed
+   - Update environment variables if new configs added
+   - Update development progress (check/uncheck items)
+   - Update project structure if new files/directories added
+
+2. **Keep descriptions accurate**:
+   - Ensure version numbers match actual dependencies
+   - Verify commands and examples are correct
+   - Update dates if necessary
+
+3. **This rule applies to**:
+   - New backend API endpoints
+   - New frontend components or pages
+   - New configuration options
+   - Database schema changes
+   - New dependencies or version upgrades
+   - Bug fixes that change documented behavior
