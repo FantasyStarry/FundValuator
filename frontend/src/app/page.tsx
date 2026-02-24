@@ -10,6 +10,7 @@ import { HoldingSheet } from "@/components/home/HoldingSheet";
 import { NewsTimeline } from "@/components/home/NewsTimeline";
 import { StatusToast } from "@/components/home/StatusToast";
 import { TransactionSheet } from "@/components/home/TransactionSheet";
+import { useWebSocket } from "@/lib/useWebSocket";
 import type {
   EstimateResponse,
   FundInfo,
@@ -21,6 +22,35 @@ import type {
   NewsItem,
   PortfolioOverview,
 } from "@/components/home/types";
+
+interface WSEstimateUpdate {
+  type: "estimate_update";
+  code: string;
+  name: string;
+  estimate_pct: number | null;
+  estimate_nav: number | null;
+  update_time: string | null;
+}
+
+interface WSPortfolioUpdate {
+  type: "portfolio_update";
+  total_amount: number;
+  total_daily_income: number;
+  total_holding_income: number;
+  daily_pct: number;
+  update_time: string | null;
+  used_source: string;
+  used_date: string | null;
+}
+
+interface WSNewsUpdate {
+  type: "news_update";
+  title: string;
+  link: string | null;
+  published_at: string | null;
+  summary: string | null;
+  source: string | null;
+}
 
 const API_BASE = "/api";
 
@@ -100,9 +130,75 @@ export default function Home() {
   const [selectedNewsKey, setSelectedNewsKey] = useState<string>("");
   const [analysisCache, setAnalysisCache] = useState<Record<string, NewsAnalysisResponse>>({});
   const [newsLoading, setNewsLoading] = useState(false);
+  const [addingFund, setAddingFund] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
 
   const selectedFund = useMemo(() => funds.find((item) => item.code === selectedCode), [funds, selectedCode]);
+
+  // WebSocket for real-time estimate updates
+  const { lastMessage: estimateMessage } = useWebSocket<WSEstimateUpdate>(
+    selectedCode ? `/ws/estimate/${selectedCode}` : "",
+    { onMessage: (data) => {
+      if (data.type === "estimate_update" && detail) {
+        setDetail(prev => prev ? {
+          ...prev,
+          estimate_pct: data.estimate_pct ?? prev.estimate_pct,
+          fund_gz_pct: data.estimate_pct ?? prev.fund_gz_pct,
+          fund_gz_nav: data.estimate_nav ?? prev.fund_gz_nav,
+          fund_gz_time: data.update_time ?? prev.fund_gz_time,
+        } : null);
+      }
+    }}
+  );
+
+  // WebSocket for real-time portfolio updates
+  const { lastMessage: portfolioMessage } = useWebSocket<WSPortfolioUpdate>(
+    "/ws/portfolio",
+    { onMessage: (data) => {
+      if (data.type === "portfolio_update") {
+        const validSources = ["realtime", "official", "transition", "holdings"] as const;
+        const source = validSources.includes(data.used_source as typeof validSources[number])
+          ? (data.used_source as typeof validSources[number])
+          : "holdings";
+        setPortfolio({
+          total_amount: data.total_amount,
+          total_daily_income: data.total_daily_income,
+          total_holding_income: data.total_holding_income,
+          daily_pct: data.daily_pct,
+          update_time: data.update_time,
+          used_source: source,
+          used_date: data.used_date,
+          switch_at: null,
+          transition_progress: null,
+          official_updated: false,
+          holiday_mode: false,
+        });
+      }
+    }}
+  );
+
+  // WebSocket for real-time news updates
+  const { lastMessage: newsMessage } = useWebSocket<WSNewsUpdate>(
+    "/ws/news",
+    { onMessage: (data) => {
+      if (data.type === "news_update") {
+        const newItem: NewsItem = {
+          title: data.title,
+          link: data.link ?? undefined,
+          published_at: data.published_at ?? undefined,
+          summary: data.summary ?? undefined,
+          source: data.source ?? undefined,
+        };
+        setNewsItems(prev => {
+          const exists = prev.some(item => 
+            (item.link || item.title) === (newItem.link || newItem.title)
+          );
+          if (exists) return prev;
+          return [newItem, ...prev].slice(0, NEWS_MAX_ITEMS);
+        });
+      }
+    }}
+  );
 
   const [showTransactionSheet, setShowTransactionSheet] = useState(false);
   const [transType, setTransType] = useState<"buy" | "sell">("buy");
@@ -403,15 +499,35 @@ export default function Home() {
   }, [chartOption]);
 
   const handleAddFund = async (code: string) => {
+    // 立即关闭搜索弹窗
+    setMarketQuery("");
+    setMarketResults([]);
+    setAddingFund(true);
+    
     try {
-      await addFund(code);
-      await loadFunds(listQuery);
-      await loadPortfolio();
-      setMarketQuery("");
-      setMarketResults([]);
+      const newFund = await addFund(code);
+      
+      // 乐观更新：先在本地添加基金
+      setFunds(prev => {
+        const exists = prev.some(f => f.code === code);
+        if (exists) return prev;
+        return [...prev, newFund];
+      });
+      
+      // 自动选中新添加的基金
+      setSelectedCode(code);
+      
       pushStatus("基金已加入");
+      
+      // 后台刷新数据（不阻塞 UI）
+      Promise.all([
+        loadFunds(listQuery),
+        loadPortfolio()
+      ]).catch(() => {});
     } catch (err) {
       pushStatus(err instanceof Error ? err.message : "添加失败");
+    } finally {
+      setAddingFund(false);
     }
   };
 
@@ -531,6 +647,7 @@ export default function Home() {
         marketResults={marketResults}
         onAddFund={handleAddFund}
         updateTime={portfolio?.update_time}
+        addingFund={addingFund}
       />
 
       <div className="flex-1 overflow-hidden">

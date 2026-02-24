@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Activity, Clock, Plus, Search } from "lucide-react";
+import { Activity, Clock, Loader2, Plus, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { MarketFund } from "@/components/home/types";
@@ -11,6 +11,7 @@ type HeaderBarProps = {
   marketResults: MarketFund[];
   onAddFund: (code: string) => void;
   updateTime?: string | null;
+  addingFund?: boolean;
 };
 
 export const HeaderBar = ({
@@ -20,6 +21,7 @@ export const HeaderBar = ({
   marketResults,
   onAddFund,
   updateTime,
+  addingFund,
 }: HeaderBarProps) => {
   return (
     <header ref={headerRef} className="border-b border-border/40 bg-background/80 backdrop-blur-md sticky top-0 z-50">
@@ -35,14 +37,19 @@ export const HeaderBar = ({
         </div>
         <div className="flex flex-wrap items-center gap-4 justify-between lg:justify-end">
           <div className="relative w-full max-w-[520px] lg:w-[320px] group">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+            {addingFund ? (
+              <Loader2 className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground animate-spin" />
+            ) : (
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+            )}
             <Input
               className="pl-9 h-10 bg-secondary/30 border-transparent focus:bg-background focus:border-primary/20 transition-all duration-300"
-              placeholder="搜索代码或名称..."
+              placeholder={addingFund ? "正在添加基金..." : "搜索代码或名称..."}
               value={marketQuery}
               onChange={(e) => onMarketQueryChange(e.target.value)}
+              disabled={addingFund}
             />
-            {marketQuery && (
+            {marketQuery && !addingFund && (
               <div className="absolute top-12 left-0 right-0 bg-popover border border-border rounded-xl p-2 flex flex-col gap-1 z-50 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                 {marketResults.slice(0, 6).map((item) => (
                   <div

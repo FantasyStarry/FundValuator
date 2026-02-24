@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import datetime, date
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -74,6 +74,48 @@ app.add_middleware(
 NEWS_CACHE_TTL_SEC = get_news_cache_ttl_sec()
 NEWS_REFRESH_INTERVAL_SEC = get_news_refresh_interval_sec()
 redis_client: Optional[Redis] = None
+
+
+class ConnectionManager:
+    def __init__(self):
+        self._connections: Dict[str, List[WebSocket]] = {}
+        self._lock = asyncio.Lock()
+
+    async def connect(self, channel: str, websocket: WebSocket) -> None:
+        await websocket.accept()
+        async with self._lock:
+            if channel not in self._connections:
+                self._connections[channel] = []
+            self._connections[channel].append(websocket)
+
+    async def disconnect(self, channel: str, websocket: WebSocket) -> None:
+        async with self._lock:
+            if channel in self._connections:
+                try:
+                    self._connections[channel].remove(websocket)
+                except ValueError:
+                    pass
+                if not self._connections[channel]:
+                    del self._connections[channel]
+
+    async def broadcast(self, channel: str, message: dict) -> None:
+        async with self._lock:
+            connections = self._connections.get(channel, [])
+        dead_connections = []
+        for conn in connections:
+            try:
+                await conn.send_json(message)
+            except Exception:
+                dead_connections.append(conn)
+        for conn in dead_connections:
+            await self.disconnect(channel, conn)
+
+    async def get_channel_count(self, channel: str) -> int:
+        async with self._lock:
+            return len(self._connections.get(channel, []))
+
+
+ws_manager = ConnectionManager()
 
 
 def _extract_date(value: Optional[str]) -> Optional[str]:
@@ -449,6 +491,9 @@ async def startup_event() -> None:
     except Exception:
         pass
 
+    # Start portfolio push loop
+    asyncio.create_task(_portfolio_push_loop())
+
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
@@ -670,11 +715,26 @@ async def api_add_fund(payload: FundCreate) -> FundInfo:
         if not fund_gz:
             raise HTTPException(status_code=400, detail="无法获取基金估值信息")
         name = fund_gz.get("name", code)
+        
+        # 异步获取持仓数据，但不阻塞响应
         holdings, holdings_time = await fetch_holdings(code)
         upsert_fund(code, name, holdings_time)
         if holdings:
             replace_holdings(code, holdings)
-        return FundInfo(code=code, name=name, updated_at=holdings_time)
+        
+        # 直接返回估值数据
+        estimate_pct = None
+        try:
+            estimate_pct = float(fund_gz.get("gszzl", 0)) if fund_gz.get("gszzl") else None
+        except (ValueError, TypeError):
+            pass
+        
+        return FundInfo(
+            code=code, 
+            name=name, 
+            updated_at=holdings_time,
+            estimate_pct=estimate_pct
+        )
     except HTTPException:
         raise
     except Exception:
@@ -895,6 +955,159 @@ async def api_ai_news_analyze(payload: NewsAnalysisRequest) -> NewsAnalysisRespo
         if redis_client:
             await _redis_set_obj(_analysis_cache_key(news_id), normalized, NEWS_CACHE_TTL_SEC)
     return NewsAnalysisResponse(**normalized)
+
+
+def _is_trading_time() -> bool:
+    now = datetime.now()
+    hour = now.hour
+    minute = now.minute
+    weekday = now.weekday()
+    if weekday >= 5:
+        return False
+    if (9 <= hour < 11) or (hour == 11 and minute <= 30):
+        return True
+    if 13 <= hour < 15:
+        return True
+    return False
+
+
+async def _estimate_push_loop(code: str) -> None:
+    while True:
+        try:
+            count = await ws_manager.get_channel_count(f"estimate:{code}")
+            if count == 0:
+                await asyncio.sleep(1)
+                continue
+            if not _is_trading_time():
+                await asyncio.sleep(5)
+                continue
+            fund = get_fund(code)
+            if not fund:
+                await asyncio.sleep(5)
+                continue
+            fund_gz = await fetch_fund_gz(code)
+            if fund_gz:
+                await ws_manager.broadcast(f"estimate:{code}", {
+                    "type": "estimate_update",
+                    "code": code,
+                    "name": fund["name"],
+                    "estimate_pct": float(fund_gz.get("gszzl", 0)) if fund_gz.get("gszzl") else None,
+                    "estimate_nav": float(fund_gz.get("gsz", 0)) if fund_gz.get("gsz") else None,
+                    "update_time": fund_gz.get("gztime"),
+                })
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(5)
+
+
+async def _portfolio_push_loop() -> None:
+    while True:
+        try:
+            count = await ws_manager.get_channel_count("portfolio")
+            if count == 0:
+                await asyncio.sleep(1)
+                continue
+            if not _is_trading_time():
+                await asyncio.sleep(5)
+                continue
+            overview = await api_portfolio_overview()
+            await ws_manager.broadcast("portfolio", {
+                "type": "portfolio_update",
+                "total_amount": overview.total_amount,
+                "total_daily_income": overview.total_daily_income,
+                "total_holding_income": overview.total_holding_income,
+                "daily_pct": overview.daily_pct,
+                "update_time": overview.update_time,
+                "used_source": overview.used_source,
+                "used_date": overview.used_date,
+            })
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(5)
+
+
+_news_push_task: Optional[asyncio.Task] = None
+_last_news_check: float = 0
+
+
+async def _news_push_loop() -> None:
+    global _last_news_check
+    while True:
+        try:
+            count = await ws_manager.get_channel_count("news")
+            if count == 0:
+                await asyncio.sleep(1)
+                continue
+            now_ts = datetime.now().timestamp()
+            if now_ts - _last_news_check < 30:
+                await asyncio.sleep(5)
+                continue
+            _last_news_check = now_ts
+            items = await _load_news_with_cache(source="rss", limit=20)
+            if items:
+                for item in items[:5]:
+                    await ws_manager.broadcast("news", {
+                        "type": "news_update",
+                        "title": item.get("title"),
+                        "link": item.get("link"),
+                        "published_at": item.get("published_at"),
+                        "summary": item.get("summary"),
+                        "source": item.get("source"),
+                    })
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(10)
+
+
+@app.websocket("/ws/estimate/{code}")
+async def ws_estimate(websocket: WebSocket, code: str) -> None:
+    await ws_manager.connect(f"estimate:{code}", websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await ws_manager.disconnect(f"estimate:{code}", websocket)
+
+
+@app.websocket("/ws/portfolio")
+async def ws_portfolio(websocket: WebSocket) -> None:
+    await ws_manager.connect("portfolio", websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await ws_manager.disconnect("portfolio", websocket)
+
+
+@app.websocket("/ws/news")
+async def ws_news(websocket: WebSocket) -> None:
+    global _news_push_task
+    await ws_manager.connect("news", websocket)
+    if _news_push_task is None or _news_push_task.done():
+        _news_push_task = asyncio.create_task(_news_push_loop())
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await ws_manager.disconnect("news", websocket)
 
 
 if DIST_DIR.exists():
