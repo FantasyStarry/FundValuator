@@ -75,6 +75,12 @@ NEWS_CACHE_TTL_SEC = get_news_cache_ttl_sec()
 NEWS_REFRESH_INTERVAL_SEC = get_news_refresh_interval_sec()
 redis_client: Optional[Redis] = None
 
+# WebSocket push task registry
+_estimate_push_tasks: Dict[str, asyncio.Task] = {}
+_portfolio_push_task: Optional[asyncio.Task] = None
+_news_push_task: Optional[asyncio.Task] = None
+_last_news_check: float = 0
+
 
 class ConnectionManager:
     def __init__(self):
@@ -497,6 +503,33 @@ async def startup_event() -> None:
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    # Cancel all WebSocket push tasks
+    global _estimate_push_tasks, _portfolio_push_task, _news_push_task
+    
+    for code, task in list(_estimate_push_tasks.items()):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    _estimate_push_tasks.clear()
+    
+    if _portfolio_push_task is not None:
+        _portfolio_push_task.cancel()
+        try:
+            await _portfolio_push_task
+        except asyncio.CancelledError:
+            pass
+        _portfolio_push_task = None
+    
+    if _news_push_task is not None:
+        _news_push_task.cancel()
+        try:
+            await _news_push_task
+        except asyncio.CancelledError:
+            pass
+        _news_push_task = None
+    
     if redis_client:
         await redis_client.close()
 
@@ -743,10 +776,19 @@ async def api_add_fund(payload: FundCreate) -> FundInfo:
 
 @app.delete("/api/funds/{code}", status_code=204)
 async def api_delete_fund(code: str) -> None:
+    global _estimate_push_tasks
     fund = get_fund(code)
     if not fund:
         raise HTTPException(status_code=404, detail="基金不存在")
     delete_fund(code)
+    # Cancel associated WebSocket push task if exists
+    if code in _estimate_push_tasks:
+        _estimate_push_tasks[code].cancel()
+        try:
+            await _estimate_push_tasks[code]
+        except asyncio.CancelledError:
+            pass
+        del _estimate_push_tasks[code]
 
 
 @app.put("/api/funds/{code}/amount", response_model=FundInfo)
@@ -1030,10 +1072,6 @@ async def _portfolio_push_loop() -> None:
             await asyncio.sleep(5)
 
 
-_news_push_task: Optional[asyncio.Task] = None
-_last_news_check: float = 0
-
-
 async def _news_push_loop() -> None:
     global _last_news_check
     while True:
@@ -1067,7 +1105,11 @@ async def _news_push_loop() -> None:
 
 @app.websocket("/ws/estimate/{code}")
 async def ws_estimate(websocket: WebSocket, code: str) -> None:
+    global _estimate_push_tasks
     await ws_manager.connect(f"estimate:{code}", websocket)
+    # Start push task if not already running
+    if code not in _estimate_push_tasks or _estimate_push_tasks[code].done():
+        _estimate_push_tasks[code] = asyncio.create_task(_estimate_push_loop(code))
     try:
         while True:
             data = await websocket.receive_text()
@@ -1077,11 +1119,24 @@ async def ws_estimate(websocket: WebSocket, code: str) -> None:
         pass
     finally:
         await ws_manager.disconnect(f"estimate:{code}", websocket)
+        # Cancel task if no more connections
+        count = await ws_manager.get_channel_count(f"estimate:{code}")
+        if count == 0 and code in _estimate_push_tasks:
+            _estimate_push_tasks[code].cancel()
+            try:
+                await _estimate_push_tasks[code]
+            except asyncio.CancelledError:
+                pass
+            del _estimate_push_tasks[code]
 
 
 @app.websocket("/ws/portfolio")
 async def ws_portfolio(websocket: WebSocket) -> None:
+    global _portfolio_push_task
     await ws_manager.connect("portfolio", websocket)
+    # Start push task if not already running
+    if _portfolio_push_task is None or _portfolio_push_task.done():
+        _portfolio_push_task = asyncio.create_task(_portfolio_push_loop())
     try:
         while True:
             data = await websocket.receive_text()
@@ -1091,12 +1146,22 @@ async def ws_portfolio(websocket: WebSocket) -> None:
         pass
     finally:
         await ws_manager.disconnect("portfolio", websocket)
+        # Cancel task if no more connections
+        count = await ws_manager.get_channel_count("portfolio")
+        if count == 0 and _portfolio_push_task is not None:
+            _portfolio_push_task.cancel()
+            try:
+                await _portfolio_push_task
+            except asyncio.CancelledError:
+                pass
+            _portfolio_push_task = None
 
 
 @app.websocket("/ws/news")
 async def ws_news(websocket: WebSocket) -> None:
     global _news_push_task
     await ws_manager.connect("news", websocket)
+    # Start push task if not already running
     if _news_push_task is None or _news_push_task.done():
         _news_push_task = asyncio.create_task(_news_push_loop())
     try:
@@ -1108,6 +1173,15 @@ async def ws_news(websocket: WebSocket) -> None:
         pass
     finally:
         await ws_manager.disconnect("news", websocket)
+        # Cancel task if no more connections
+        count = await ws_manager.get_channel_count("news")
+        if count == 0 and _news_push_task is not None:
+            _news_push_task.cancel()
+            try:
+                await _news_push_task
+            except asyncio.CancelledError:
+                pass
+            _news_push_task = None
 
 
 if DIST_DIR.exists():
