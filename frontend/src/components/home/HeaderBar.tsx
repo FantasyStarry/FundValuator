@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { MarketFund } from "@/components/home/types";
 
 type HeaderBarProps = {
-  headerRef: RefObject<HTMLElement>;
+  headerRef: RefObject<HTMLElement | null>;
   marketQuery: string;
   onMarketQueryChange: (value: string) => void;
   marketResults: MarketFund[];

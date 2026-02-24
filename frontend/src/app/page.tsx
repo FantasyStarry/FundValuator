@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as echarts from "echarts";
+import type { TooltipComponentFormatterCallbackParams } from "echarts";
 import { DashboardMain } from "@/components/home/DashboardMain";
 import { FundListSidebar } from "@/components/home/FundListSidebar";
 import { HeaderBar } from "@/components/home/HeaderBar";
@@ -155,19 +156,17 @@ export default function Home() {
   const [chartPeriod, setChartPeriod] = useState<"intraday" | "1m" | "3m" | "1y">("1m");
 
   const chartOption = useMemo(() => {
-    // If intraday and no items, return null to show "Coming Soon" placeholder
     if (chartPeriod === "intraday" && !navItems.length) return null;
     
     if (!navItems.length) return null;
 
-    // Ensure chronological order (oldest to newest) for the chart
     const chartData = [...navItems].reverse();
 
     return {
       backgroundColor: "transparent",
       grid: { left: 40, right: 20, top: 20, bottom: 20, containLabel: true },
       xAxis: {
-        type: "category",
+        type: "category" as const,
         data: chartData.map((item) => item.date),
         axisLabel: { color: "#6b6258", fontFamily: "monospace", fontSize: 10 },
         axisLine: { show: false },
@@ -175,30 +174,32 @@ export default function Home() {
         boundaryGap: false,
       },
       yAxis: {
-        type: "value",
+        type: "value" as const,
         axisLabel: { color: "#6b6258", fontFamily: "monospace", fontSize: 10 },
-        splitLine: { lineStyle: { color: "#ded6c8", type: "dashed" } },
+        splitLine: { lineStyle: { color: "#ded6c8", type: "dashed" as const } },
         scale: true,
       },
       tooltip: {
-        trigger: "axis",
+        trigger: "axis" as const,
         backgroundColor: "rgba(31, 31, 28, 0.95)",
         borderColor: "transparent",
         textStyle: { color: "#f6f1e7", fontSize: 12 },
         padding: [8, 12],
         axisPointer: {
-          type: "cross",
+          type: "cross" as const,
           label: {
             backgroundColor: "#2f5b43"
           }
         },
-        formatter: (params: any) => {
-          const item = params[0];
+        formatter: (params: TooltipComponentFormatterCallbackParams) => {
+          const item = Array.isArray(params) ? params[0] : params;
           if (!item) return "";
+          const value = item.value;
+          const valueStr = typeof value === 'number' ? value.toFixed(4) : String(value ?? '0');
           return `
             <div class="font-mono">
-              <div class="text-[10px] text-muted-foreground mb-1">${item.name}</div>
-              <div class="font-bold text-base">${parseFloat(item.value).toFixed(4)}</div>
+              <div class="text-[10px] text-muted-foreground mb-1">${String(item.name ?? '')}</div>
+              <div class="font-bold text-base">${valueStr}</div>
             </div>
           `;
         }
@@ -206,7 +207,7 @@ export default function Home() {
       series: [
         {
           data: chartData.map((item) => item.nav),
-          type: "line",
+          type: "line" as const,
           smooth: true,
           showSymbol: false,
           lineStyle: { color: "#1f4d3a", width: 2 },
@@ -217,18 +218,18 @@ export default function Home() {
             ])
           },
           markLine: selectedFund?.cost && selectedFund.cost > 0 ? {
-            symbol: "none",
+            symbol: "none" as const,
             data: [{
               yAxis: selectedFund.cost,
               label: {
                 formatter: "持仓成本",
-                position: "start",
+                position: "start" as const,
                 color: "#f59e0b",
                 fontSize: 10
               },
               lineStyle: {
                 color: "#f59e0b",
-                type: "dashed",
+                type: "dashed" as const,
                 width: 1
               }
             }]

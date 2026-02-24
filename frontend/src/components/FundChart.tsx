@@ -2,9 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import * as echarts from "echarts";
+import type { EChartsOption } from "echarts";
 
 interface FundChartProps {
-  option: any;
+  option: EChartsOption;
   className?: string;
 }
 
