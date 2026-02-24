@@ -686,6 +686,7 @@ async def api_portfolio_overview() -> PortfolioOverview:
                     fund_holding_income = (fund_current_amount / shares - cost) * shares
         else:
             base_amount = fund["amount"]
+            invested_amount = fund.get("invested_amount", 0.0) or 0.0
             ratio = 1 + used_pct / 100
             if ratio > 0:
                 fund_yesterday_amount = base_amount / ratio
@@ -694,7 +695,7 @@ async def api_portfolio_overview() -> PortfolioOverview:
                 fund_yesterday_amount = base_amount
                 fund_daily_income = 0.0
             fund_current_amount = base_amount
-            fund_holding_income = 0.0
+            fund_holding_income = base_amount - invested_amount if invested_amount > 0 else 0.0
 
         total_amount += fund_current_amount
         total_daily_income += fund_daily_income
@@ -801,7 +802,8 @@ async def api_update_fund_amount(code: str, payload: FundUpdate) -> FundInfo:
         amount=payload.amount, 
         mode=payload.mode, 
         shares=payload.shares, 
-        cost=payload.cost
+        cost=payload.cost,
+        invested_amount=payload.invested_amount
     )
     updated_fund = get_fund(code)
     return FundInfo(**updated_fund)
@@ -899,9 +901,11 @@ async def api_fund_estimate(code: str) -> EstimateResponse:
                 
         else:
             current_amount = fund.get("amount", 0.0)
+            invested_amount = fund.get("invested_amount", 0.0) or 0.0
             ratio = 1 + estimate_pct / 100
             if ratio > 0:
                 estimate_income = current_amount - current_amount / ratio
+            total_income = current_amount - invested_amount if invested_amount > 0 else 0.0
 
         return EstimateResponse(
             code=code,

@@ -6,6 +6,7 @@ export type FundInfo = {
   mode: "amount" | "shares";
   shares: number;
   cost: number;
+  invested_amount: number;  // 金额模式下的投入本金
   estimate_pct?: number | null;
 };
 

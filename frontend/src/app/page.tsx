@@ -87,7 +87,7 @@ const deleteFund = (code: string): Promise<void> =>
     method: "DELETE",
   });
 
-const updateFundAmount = (code: string, payload: { amount: number; mode: "amount" | "shares"; shares: number; cost: number }) =>
+const updateFundAmount = (code: string, payload: { amount: number; mode: "amount" | "shares"; shares: number; cost: number; invested_amount: number }) =>
   fetchJson<FundInfo>(`/funds/${code}/amount`, {
     method: "PUT",
     body: JSON.stringify(payload),
@@ -124,6 +124,7 @@ export default function Home() {
   const [inputAmount, setInputAmount] = useState("");
   const [inputShares, setInputShares] = useState("");
   const [inputCost, setInputCost] = useState("");
+  const [inputInvestedAmount, setInputInvestedAmount] = useState("");
   const [showHoldingSheet, setShowHoldingSheet] = useState(false);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const newsSource = "rss";
@@ -345,6 +346,7 @@ export default function Home() {
     setInputAmount(fund?.amount ? String(fund.amount) : "");
     setInputShares(fund?.shares ? String(fund.shares) : "");
     setInputCost(fund?.cost ? String(fund.cost) : "");
+    setInputInvestedAmount(fund?.invested_amount ? String(fund.invested_amount) : "");
   }, []);
 
   const loadFunds = useCallback(async (keyword = "") => {
@@ -551,6 +553,7 @@ export default function Home() {
     const amount = Number.parseFloat(inputAmount || "0");
     const shares = Number.parseFloat(inputShares || "0");
     const cost = Number.parseFloat(inputCost || "0");
+    const investedAmount = Number.parseFloat(inputInvestedAmount || "0");
     if (editMode === "amount" && Number.isNaN(amount)) {
       pushStatus("请输入有效金额");
       return;
@@ -565,6 +568,7 @@ export default function Home() {
         mode: editMode,
         shares: editMode === "shares" ? shares : 0,
         cost: editMode === "shares" ? cost : 0,
+        invested_amount: editMode === "amount" ? investedAmount : 0,
       });
       await loadFunds(listQuery);
       await loadPortfolio();
@@ -582,6 +586,7 @@ export default function Home() {
     let finalAmount = selectedFund.amount;
     let finalShares = selectedFund.shares;
     let finalCost = selectedFund.cost;
+    let finalInvestedAmount = selectedFund.invested_amount || 0;
     const mode = selectedFund.mode;
 
     const tAmount = parseFloat(transAmount) || 0;
@@ -591,10 +596,13 @@ export default function Home() {
     if (mode === "amount") {
        if (transType === "buy") {
          finalAmount += tAmount;
+         finalInvestedAmount += tAmount;
        } else {
          finalAmount -= tAmount;
+         finalInvestedAmount -= tAmount;
        }
        if (finalAmount < 0) finalAmount = 0;
+       if (finalInvestedAmount < 0) finalInvestedAmount = 0;
     } else {
        // shares mode
        if (transType === "buy") {
@@ -623,6 +631,7 @@ export default function Home() {
         mode: mode,
         shares: mode === "shares" ? finalShares : 0,
         cost: mode === "shares" ? finalCost : 0,
+        invested_amount: mode === "amount" ? finalInvestedAmount : 0,
       });
       await loadFunds(listQuery);
       await loadPortfolio();
@@ -721,6 +730,8 @@ export default function Home() {
         onInputSharesChange={setInputShares}
         inputCost={inputCost}
         onInputCostChange={setInputCost}
+        inputInvestedAmount={inputInvestedAmount}
+        onInputInvestedAmountChange={setInputInvestedAmount}
         onSubmit={handleUpdateHolding}
       />
     </div>

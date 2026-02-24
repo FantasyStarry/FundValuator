@@ -14,6 +14,7 @@ class FundInfo(BaseModel):
     mode: str = "amount"
     shares: float = 0.0
     cost: float = 0.0
+    invested_amount: float = 0.0  # 金额模式下的投入本金
     estimate_pct: Optional[float] = None
     last_source: Optional[str] = None
     last_source_date: Optional[str] = None
@@ -27,6 +28,7 @@ class FundUpdate(BaseModel):
     mode: str = "amount"
     shares: float = 0.0
     cost: float = 0.0
+    invested_amount: float = 0.0  # 金额模式下的投入本金
 
 
 class Holding(BaseModel):

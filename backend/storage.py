@@ -30,6 +30,7 @@ def init_db() -> None:
                     mode TEXT DEFAULT 'amount',
                     shares REAL DEFAULT 0,
                     cost REAL DEFAULT 0,
+                    invested_amount REAL DEFAULT 0,
                     last_source TEXT,
                     last_source_date TEXT,
                     last_source_pct REAL,
@@ -43,6 +44,7 @@ def init_db() -> None:
                 ("mode", "TEXT", "'amount'"),
                 ("shares", "REAL", "0"),
                 ("cost", "REAL", "0"),
+                ("invested_amount", "REAL", "0"),
                 ("last_source", "TEXT", "NULL"),
                 ("last_source_date", "TEXT", "NULL"),
                 ("last_source_pct", "REAL", "NULL"),
@@ -126,12 +128,12 @@ def update_fund_amount(code: str, amount: float) -> None:
     # Deprecated: use update_fund_holding instead
     update_fund_holding(code, amount=amount)
 
-def update_fund_holding(code: str, amount: float = 0.0, mode: str = "amount", shares: float = 0.0, cost: float = 0.0) -> None:
+def update_fund_holding(code: str, amount: float = 0.0, mode: str = "amount", shares: float = 0.0, cost: float = 0.0, invested_amount: float = 0.0) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE funds SET amount = %s, mode = %s, shares = %s, cost = %s WHERE code = %s",
-                (amount, mode, shares, cost, code),
+                "UPDATE funds SET amount = %s, mode = %s, shares = %s, cost = %s, invested_amount = %s WHERE code = %s",
+                (amount, mode, shares, cost, invested_amount, code),
             )
 
 
@@ -168,12 +170,12 @@ def list_funds(keyword: str = "") -> List[dict]:
             if keyword:
                 pattern = f"%{keyword}%"
                 cur.execute(
-                    "SELECT code, name, updated_at, amount, mode, shares, cost, last_source, last_source_date, last_source_pct, last_switch_at, last_official_date FROM funds WHERE code LIKE %s OR name LIKE %s ORDER BY code",
+                    "SELECT code, name, updated_at, amount, mode, shares, cost, invested_amount, last_source, last_source_date, last_source_pct, last_switch_at, last_official_date FROM funds WHERE code LIKE %s OR name LIKE %s ORDER BY code",
                     (pattern, pattern),
                 )
             else:
                 cur.execute(
-                    "SELECT code, name, updated_at, amount, mode, shares, cost, last_source, last_source_date, last_source_pct, last_switch_at, last_official_date FROM funds ORDER BY code"
+                    "SELECT code, name, updated_at, amount, mode, shares, cost, invested_amount, last_source, last_source_date, last_source_pct, last_switch_at, last_official_date FROM funds ORDER BY code"
                 )
             rows = cur.fetchall()
     return list(rows)
@@ -183,7 +185,7 @@ def get_fund(code: str) -> Optional[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT code, name, updated_at, amount, mode, shares, cost, last_source, last_source_date, last_source_pct, last_switch_at, last_official_date FROM funds WHERE code = %s",
+                "SELECT code, name, updated_at, amount, mode, shares, cost, invested_amount, last_source, last_source_date, last_source_pct, last_switch_at, last_official_date FROM funds WHERE code = %s",
                 (code,),
             )
             row = cur.fetchone()
