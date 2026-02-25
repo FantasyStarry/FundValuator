@@ -873,9 +873,16 @@ async def api_add_transaction(payload: TransactionCreate) -> TransactionInfo:
     shares = payload.shares
     price = payload.price
     
-    if payload.mode == "amount" and price > 0:
+    if payload.price <= 0:
+        raise HTTPException(status_code=400, detail="交易价格必须大于0")
+    
+    if payload.mode == "amount":
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="交易金额必须大于0")
         shares = amount / price
-    elif payload.mode == "shares" and price > 0:
+    elif payload.mode == "shares":
+        if shares <= 0:
+            raise HTTPException(status_code=400, detail="交易份额必须大于0")
         amount = shares * price
     
     trans_id = add_transaction(
