@@ -39,6 +39,25 @@ def init_db() -> None:
                 )
                 """
             )
+            # 添加交易记录表
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS transactions (
+                    id SERIAL PRIMARY KEY,
+                    fund_code TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    amount REAL DEFAULT 0,
+                    shares REAL DEFAULT 0,
+                    price REAL DEFAULT 0,
+                    trans_date TEXT NOT NULL,
+                    is_after_3pm INTEGER DEFAULT 0,
+                    confirm_date TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT,
+                    FOREIGN KEY (fund_code) REFERENCES funds(code)
+                )
+                """
+            )
             for col, col_type, default in [
                 ("amount", "REAL", "0"),
                 ("mode", "TEXT", "'amount'"),
@@ -94,6 +113,7 @@ def init_db() -> None:
                 """
             )
             cur.execute("ALTER TABLE news_analysis ADD COLUMN IF NOT EXISTS importance_score REAL DEFAULT 0")
+            cur.execute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_after_3pm INTEGER DEFAULT 0")
 
 
 def upsert_fund(code: str, name: str, updated_at: Optional[str]) -> None:
@@ -332,3 +352,151 @@ def list_news_analysis(news_ids: List[str]) -> Dict[str, dict]:
         result[row["news_id"]] = row_dict
         
     return result
+
+
+# Transaction related functions
+
+def add_transaction(
+    fund_code: str,
+    trans_type: str,
+    amount: float,
+    shares: float,
+    price: float,
+    trans_date: str,
+    is_after_3pm: bool = False,
+    confirm_date: Optional[str] = None,
+    status: str = "pending",
+) -> int:
+    """添加交易记录，返回交易ID"""
+    from datetime import datetime
+    created_at = datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO transactions (fund_code, type, amount, shares, price, trans_date, is_after_3pm, confirm_date, status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (fund_code, trans_type, amount, shares, price, trans_date, 1 if is_after_3pm else 0, confirm_date, status, created_at),
+            )
+            return cur.fetchone()["id"]
+
+
+def list_transactions(fund_code: str) -> List[dict]:
+    """获取基金的所有交易记录"""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, fund_code, type, amount, shares, price, trans_date, is_after_3pm, confirm_date, status, created_at
+                FROM transactions
+                WHERE fund_code = %s
+                ORDER BY trans_date DESC, created_at DESC
+                """,
+                (fund_code,),
+            )
+            rows = cur.fetchall()
+            # 转换 is_after_3pm 为布尔值
+            result = []
+            for row in rows:
+                row_dict = dict(row)
+                row_dict["is_after_3pm"] = bool(row_dict.get("is_after_3pm", 0))
+                result.append(row_dict)
+            return result
+
+
+def get_transaction(trans_id: int) -> Optional[dict]:
+    """获取单条交易记录"""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, fund_code, type, amount, shares, price, trans_date, is_after_3pm, confirm_date, status, created_at
+                FROM transactions
+                WHERE id = %s
+                """,
+                (trans_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def update_transaction_status(trans_id: int, status: str, confirm_date: Optional[str] = None) -> None:
+    """更新交易状态"""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if confirm_date:
+                cur.execute(
+                    "UPDATE transactions SET status = %s, confirm_date = %s WHERE id = %s",
+                    (status, confirm_date, trans_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE transactions SET status = %s WHERE id = %s",
+                    (status, trans_id),
+                )
+
+
+def delete_transaction(trans_id: int) -> None:
+    """删除交易记录"""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM transactions WHERE id = %s", (trans_id,))
+
+
+def get_confirmed_transactions(fund_code: str) -> List[dict]:
+    """获取已确认的交易记录（用于计算持仓）"""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, fund_code, type, amount, shares, price, trans_date, confirm_date, status, created_at
+                FROM transactions
+                WHERE fund_code = %s AND status = 'confirmed'
+                ORDER BY confirm_date ASC, trans_date ASC
+                """,
+                (fund_code,),
+            )
+            return list(cur.fetchall())
+
+
+def calculate_position_from_transactions(fund_code: str) -> dict:
+    """根据已确认的交易记录计算持仓"""
+    transactions = get_confirmed_transactions(fund_code)
+    
+    total_shares = 0.0
+    total_cost = 0.0  # 总投入成本
+    total_amount = 0.0  # 金额模式下的总金额
+    
+    for trans in transactions:
+        trans_type = trans["type"]
+        shares = trans["shares"] or 0.0
+        amount = trans["amount"] or 0.0
+        price = trans["price"] or 0.0
+        
+        if trans_type == "buy":
+            total_shares += shares
+            total_amount += amount
+            # 份额模式下，计算总成本
+            if shares > 0 and price > 0:
+                total_cost += shares * price
+        elif trans_type == "sell":
+            if total_shares > 0:
+                # 按比例减少成本
+                if shares > 0 and total_shares >= shares:
+                    cost_per_share = total_cost / total_shares if total_shares > 0 else 0
+                    total_cost -= shares * cost_per_share
+                    total_shares -= shares
+            total_amount -= amount
+            if total_amount < 0:
+                total_amount = 0
+    
+    # 计算平均成本单价
+    avg_cost = total_cost / total_shares if total_shares > 0 else 0.0
+    
+    return {
+        "shares": round(total_shares, 2),
+        "cost": round(avg_cost, 4),
+        "invested_amount": round(total_amount, 2),
+    }

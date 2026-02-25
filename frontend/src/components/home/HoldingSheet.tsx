@@ -16,8 +16,6 @@ type HoldingSheetProps = {
   onInputSharesChange: (value: string) => void;
   inputCost: string;
   onInputCostChange: (value: string) => void;
-  inputInvestedAmount: string;
-  onInputInvestedAmountChange: (value: string) => void;
   onSubmit: () => void;
 };
 
@@ -33,8 +31,6 @@ export const HoldingSheet = ({
   onInputSharesChange,
   inputCost,
   onInputCostChange,
-  inputInvestedAmount,
-  onInputInvestedAmountChange,
   onSubmit,
 }: HoldingSheetProps) => {
   if (!open) return null;
@@ -60,17 +56,11 @@ export const HoldingSheet = ({
 
           <div className="space-y-4">
             {editMode === "amount" ? (
-              <>
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-muted-foreground">持有金额</label>
-                  <Input className="font-mono" value={inputAmount} onChange={(e) => onInputAmountChange(e.target.value)} placeholder="当前市值" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-muted-foreground">投入本金</label>
-                  <Input className="font-mono" value={inputInvestedAmount} onChange={(e) => onInputInvestedAmountChange(e.target.value)} placeholder="实际投入金额" />
-                  <p className="text-[10px] text-muted-foreground">用于计算持有收益</p>
-                </div>
-              </>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">持有金额</label>
+                <Input className="font-mono" value={inputAmount} onChange={(e) => onInputAmountChange(e.target.value)} placeholder="当前市值" />
+                <p className="text-[10px] text-muted-foreground">通过交易记录自动计算成本和收益</p>
+              </div>
             ) : (
               <>
                 <div className="space-y-2">

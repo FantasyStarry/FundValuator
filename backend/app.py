@@ -38,6 +38,8 @@ from .models import (
     NewsFeedResponse,
     NewsItem,
     PortfolioOverview,
+    TransactionCreate,
+    TransactionInfo,
 )
 from .storage import (
     clear_news_analysis,
@@ -54,6 +56,12 @@ from .storage import (
     upsert_news_analysis,
     upsert_news_items,
     upsert_fund,
+    add_transaction,
+    list_transactions,
+    get_transaction,
+    update_transaction_status,
+    delete_transaction,
+    calculate_position_from_transactions,
 )
 
 
@@ -807,6 +815,127 @@ async def api_update_fund_amount(code: str, payload: FundUpdate) -> FundInfo:
     )
     updated_fund = get_fund(code)
     return FundInfo(**updated_fund)
+
+
+def _calculate_confirm_date(trans_date_str: str, is_after_3pm: bool = False) -> str:
+    """计算确认日期：T日15:00前买入 -> T+1确认；T日15:00后买入 -> T+2确认"""
+    try:
+        trans_date = datetime.strptime(trans_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        trans_date = date.today()
+    
+    # 根据交易时间确定需要跳过的天数
+    days_to_add = 2 if is_after_3pm else 1
+    
+    confirm_date = trans_date
+    added = 0
+    while added < days_to_add:
+        # 增加一天
+        confirm_date = date.fromordinal(confirm_date.toordinal() + 1)
+        # 跳过周末 (5=Saturday, 6=Sunday)
+        if confirm_date.weekday() < 5:
+            added += 1
+    
+    return confirm_date.isoformat()
+
+
+def _is_transaction_confirmed(trans_date_str: str, is_after_3pm: bool = False) -> Tuple[bool, Optional[str]]:
+    """判断交易是否已确认"""
+    try:
+        trans_date = datetime.strptime(trans_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        trans_date = date.today()
+    
+    confirm_date = _calculate_confirm_date(trans_date_str, is_after_3pm)
+    today = date.today()
+    
+    # 如果今天 >= 确认日期，则已确认
+    is_confirmed = today.isoformat() >= confirm_date
+    return is_confirmed, confirm_date if is_confirmed else None
+
+
+@app.post("/api/transactions", response_model=TransactionInfo)
+async def api_add_transaction(payload: TransactionCreate) -> TransactionInfo:
+    """添加交易记录"""
+    fund = get_fund(payload.fund_code)
+    if not fund:
+        raise HTTPException(status_code=404, detail="基金不存在")
+    
+    if payload.type not in ("buy", "sell"):
+        raise HTTPException(status_code=400, detail="交易类型必须是 buy 或 sell")
+    
+    # 判断是否已确认
+    is_confirmed, confirm_date = _is_transaction_confirmed(payload.trans_date, payload.is_after_3pm)
+    status = "confirmed" if is_confirmed else "pending"
+    
+    # 根据模式计算份额或金额
+    amount = payload.amount
+    shares = payload.shares
+    price = payload.price
+    
+    if payload.mode == "amount" and price > 0:
+        shares = amount / price
+    elif payload.mode == "shares" and price > 0:
+        amount = shares * price
+    
+    trans_id = add_transaction(
+        fund_code=payload.fund_code,
+        trans_type=payload.type,
+        amount=amount,
+        shares=shares,
+        price=price,
+        trans_date=payload.trans_date,
+        is_after_3pm=payload.is_after_3pm,
+        confirm_date=confirm_date,
+        status=status,
+    )
+    
+    # 如果已确认，更新基金持仓
+    if is_confirmed:
+        position = calculate_position_from_transactions(payload.fund_code)
+        update_fund_holding(
+            payload.fund_code,
+            amount=position["invested_amount"],
+            mode=payload.mode,
+            shares=position["shares"],
+            cost=position["cost"],
+            invested_amount=position["invested_amount"],
+        )
+    
+    trans = get_transaction(trans_id)
+    return TransactionInfo(**trans)
+
+
+@app.get("/api/funds/{code}/transactions", response_model=List[TransactionInfo])
+async def api_list_transactions(code: str) -> List[TransactionInfo]:
+    """获取基金的交易记录"""
+    fund = get_fund(code)
+    if not fund:
+        raise HTTPException(status_code=404, detail="基金不存在")
+    
+    transactions = list_transactions(code)
+    return [TransactionInfo(**t) for t in transactions]
+
+
+@app.delete("/api/transactions/{trans_id}", status_code=204)
+async def api_delete_transaction(trans_id: int) -> None:
+    """删除交易记录"""
+    trans = get_transaction(trans_id)
+    if not trans:
+        raise HTTPException(status_code=404, detail="交易记录不存在")
+    
+    fund_code = trans["fund_code"]
+    delete_transaction(trans_id)
+    
+    # 重新计算持仓
+    position = calculate_position_from_transactions(fund_code)
+    update_fund_holding(
+        fund_code,
+        amount=position["invested_amount"],
+        shares=position["shares"],
+        cost=position["cost"],
+        invested_amount=position["invested_amount"],
+    )
 
 
 @app.get("/api/funds/{code}/estimate", response_model=EstimateResponse)

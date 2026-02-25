@@ -6,8 +6,20 @@ export type FundInfo = {
   mode: "amount" | "shares";
   shares: number;
   cost: number;
-  invested_amount: number;  // 金额模式下的投入本金
   estimate_pct?: number | null;
+};
+
+export type TransactionInfo = {
+  id: number;
+  fund_code: string;
+  type: "buy" | "sell";
+  amount: number;
+  shares: number;
+  price: number;
+  trans_date: string;
+  confirm_date?: string | null;
+  status: "pending" | "confirmed";
+  created_at?: string | null;
 };
 
 export type EstimateComponent = {

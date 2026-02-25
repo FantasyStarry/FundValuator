@@ -31,6 +31,30 @@ class FundUpdate(BaseModel):
     invested_amount: float = 0.0  # 金额模式下的投入本金
 
 
+class TransactionCreate(BaseModel):
+    fund_code: str
+    type: str  # "buy" or "sell"
+    amount: float = 0.0
+    shares: float = 0.0
+    price: float = 0.0
+    trans_date: str  # 交易日期
+    is_after_3pm: bool = False  # 是否15:00后交易
+    mode: str = "amount"  # "amount" or "shares"
+
+
+class TransactionInfo(BaseModel):
+    id: int
+    fund_code: str
+    type: str
+    amount: float
+    shares: float
+    price: float
+    trans_date: str
+    confirm_date: Optional[str] = None
+    status: str  # "pending", "confirmed"
+    created_at: Optional[str] = None
+
+
 class Holding(BaseModel):
     stock_code: str
     stock_name: str

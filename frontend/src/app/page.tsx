@@ -21,6 +21,7 @@ import type {
   NewsFeedResponse,
   NewsItem,
   PortfolioOverview,
+  TransactionInfo,
 } from "@/components/home/types";
 
 interface WSEstimateUpdate {
@@ -87,10 +88,24 @@ const deleteFund = (code: string): Promise<void> =>
     method: "DELETE",
   });
 
-const updateFundAmount = (code: string, payload: { amount: number; mode: "amount" | "shares"; shares: number; cost: number; invested_amount: number }) =>
+const updateFundAmount = (code: string, payload: { amount: number; mode: "amount" | "shares"; shares: number; cost: number }) =>
   fetchJson<FundInfo>(`/funds/${code}/amount`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+
+const addTransaction = (payload: { fund_code: string; type: "buy" | "sell"; amount: number; shares: number; price: number; trans_date: string; is_after_3pm: boolean; mode: string }) =>
+  fetchJson<TransactionInfo>("/transactions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+const fetchTransactions = (code: string) =>
+  fetchJson<TransactionInfo[]>(`/funds/${code}/transactions`);
+
+const deleteTransaction = (id: number) =>
+  fetchJson<void>(`/transactions/${id}`, {
+    method: "DELETE",
   });
 
 const fetchPortfolioOverview = () => fetchJson<PortfolioOverview>("/portfolio/overview");
@@ -124,7 +139,6 @@ export default function Home() {
   const [inputAmount, setInputAmount] = useState("");
   const [inputShares, setInputShares] = useState("");
   const [inputCost, setInputCost] = useState("");
-  const [inputInvestedAmount, setInputInvestedAmount] = useState("");
   const [showHoldingSheet, setShowHoldingSheet] = useState(false);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const newsSource = "rss";
@@ -206,21 +220,18 @@ export default function Home() {
   const [transAmount, setTransAmount] = useState("");
   const [transShares, setTransShares] = useState("");
   const [transPrice, setTransPrice] = useState("");
+  const [transDate, setTransDate] = useState("");
   const [isAfter3PM, setIsAfter3PM] = useState(false);
   
   useEffect(() => {
     if (showTransactionSheet) {
       const now = new Date();
-      // Check if after 15:00
-      const after3 = now.getHours() >= 15;
-      setIsAfter3PM(after3);
+      // 默认设置为今天日期
+      setTransDate(now.toISOString().split("T")[0]);
+      // 默认根据当前时间设置
+      setIsAfter3PM(now.getHours() >= 15);
       
       // Auto-fill price based on best available data
-      // If < 15:00, use real-time estimate (gsz) if available
-      // If >= 15:00, usually market is closed, real-time estimate is the closing estimate
-      // Or if we have today's official NAV (rarely before night), use it
-      
-      // Priority: Real-time Estimate (gsz) > Latest History NAV
       const estimateNav = detail?.fund_gz_nav;
       const historyNav = navItems.length ? navItems[navItems.length-1].nav : 0;
       
@@ -346,7 +357,6 @@ export default function Home() {
     setInputAmount(fund?.amount ? String(fund.amount) : "");
     setInputShares(fund?.shares ? String(fund.shares) : "");
     setInputCost(fund?.cost ? String(fund.cost) : "");
-    setInputInvestedAmount(fund?.invested_amount ? String(fund.invested_amount) : "");
   }, []);
 
   const loadFunds = useCallback(async (keyword = "") => {
@@ -553,7 +563,6 @@ export default function Home() {
     const amount = Number.parseFloat(inputAmount || "0");
     const shares = Number.parseFloat(inputShares || "0");
     const cost = Number.parseFloat(inputCost || "0");
-    const investedAmount = Number.parseFloat(inputInvestedAmount || "0");
     if (editMode === "amount" && Number.isNaN(amount)) {
       pushStatus("请输入有效金额");
       return;
@@ -568,7 +577,6 @@ export default function Home() {
         mode: editMode,
         shares: editMode === "shares" ? shares : 0,
         cost: editMode === "shares" ? cost : 0,
-        invested_amount: editMode === "amount" ? investedAmount : 0,
       });
       await loadFunds(listQuery);
       await loadPortfolio();
@@ -583,56 +591,36 @@ export default function Home() {
   const handleTransaction = async () => {
     if (!selectedFund) return;
     
-    let finalAmount = selectedFund.amount;
-    let finalShares = selectedFund.shares;
-    let finalCost = selectedFund.cost;
-    let finalInvestedAmount = selectedFund.invested_amount || 0;
-    const mode = selectedFund.mode;
-
     const tAmount = parseFloat(transAmount) || 0;
     const tShares = parseFloat(transShares) || 0;
     const tPrice = parseFloat(transPrice) || 0;
+    const mode = selectedFund.mode;
 
-    if (mode === "amount") {
-       if (transType === "buy") {
-         finalAmount += tAmount;
-         finalInvestedAmount += tAmount;
-       } else {
-         finalAmount -= tAmount;
-         finalInvestedAmount -= tAmount;
-       }
-       if (finalAmount < 0) finalAmount = 0;
-       if (finalInvestedAmount < 0) finalInvestedAmount = 0;
-    } else {
-       // shares mode
-       if (transType === "buy") {
-          // New Shares = Old Shares + Transaction Shares
-          // New Cost = ((Old Shares * Old Cost) + (Transaction Shares * Transaction Price)) / New Shares
-          const costToAdd = tShares * tPrice;
-          const oldTotalCost = finalShares * finalCost;
-          const newTotalCost = oldTotalCost + costToAdd;
-          finalShares += tShares;
-          if (finalShares > 0) {
-             finalCost = newTotalCost / finalShares;
-          }
-       } else {
-          // Sell
-          // Shares decrease
-          // Cost per share remains same (FIFO/Average Cost assumption)
-          finalShares -= tShares;
-          if (finalShares < 0) finalShares = 0;
-          if (finalShares === 0) finalCost = 0;
-       }
+    if (mode === "amount" && tAmount <= 0) {
+      pushStatus("请输入有效金额");
+      return;
+    }
+    if (mode === "shares" && (tShares <= 0 || tPrice <= 0)) {
+      pushStatus("请输入有效份额和价格");
+      return;
+    }
+    if (!transDate) {
+      pushStatus("请选择交易日期");
+      return;
     }
 
     try {
-      await updateFundAmount(selectedFund.code, {
-        amount: mode === "amount" ? finalAmount : 0,
+      await addTransaction({
+        fund_code: selectedFund.code,
+        type: transType,
+        amount: mode === "amount" ? tAmount : tShares * tPrice,
+        shares: mode === "shares" ? tShares : tPrice > 0 ? tAmount / tPrice : 0,
+        price: tPrice,
+        trans_date: transDate,
+        is_after_3pm: isAfter3PM,
         mode: mode,
-        shares: mode === "shares" ? finalShares : 0,
-        cost: mode === "shares" ? finalCost : 0,
-        invested_amount: mode === "amount" ? finalInvestedAmount : 0,
       });
+      
       await loadFunds(listQuery);
       await loadPortfolio();
       await loadDetail(selectedFund.code);
@@ -642,6 +630,7 @@ export default function Home() {
       setTransAmount("");
       setTransShares("");
       setTransPrice("");
+      setTransDate("");
     } catch (err) {
       pushStatus(err instanceof Error ? err.message : "交易失败");
     }
@@ -714,7 +703,10 @@ export default function Home() {
         onTransSharesChange={setTransShares}
         transPrice={transPrice}
         onTransPriceChange={setTransPrice}
+        transDate={transDate}
+        onTransDateChange={setTransDate}
         isAfter3PM={isAfter3PM}
+        onIsAfter3PMChange={setIsAfter3PM}
         onSubmit={handleTransaction}
       />
 
@@ -730,8 +722,6 @@ export default function Home() {
         onInputSharesChange={setInputShares}
         inputCost={inputCost}
         onInputCostChange={setInputCost}
-        inputInvestedAmount={inputInvestedAmount}
-        onInputInvestedAmountChange={setInputInvestedAmount}
         onSubmit={handleUpdateHolding}
       />
     </div>
