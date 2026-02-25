@@ -53,6 +53,21 @@ def get_deepseek_model() -> str:
     return os.getenv("DEEPSEEK_MODEL") or _get_nested(config, ["deepseek", "model"]) or "deepseek-chat"
 
 
+def get_mimo_api_key() -> Optional[str]:
+    config = _load_local_config()
+    return os.getenv("MIMO_API_KEY") or _get_nested(config, ["mimo", "api_key"])
+
+
+def get_mimo_base_url() -> str:
+    config = _load_local_config()
+    return os.getenv("MIMO_BASE_URL") or _get_nested(config, ["mimo", "base_url"]) or "https://api.xiaomimimo.com/v1"
+
+
+def get_mimo_model() -> str:
+    config = _load_local_config()
+    return os.getenv("MIMO_MODEL") or _get_nested(config, ["mimo", "model"]) or "mimo-v2-flash"
+
+
 def get_news_rss_url() -> str:
     config = _load_local_config()
     return os.getenv("NEWS_RSS_URL") or _get_nested(config, ["news", "rss_url"]) or "http://rss.sina.com.cn/roll/finance/hot_roll.xml"

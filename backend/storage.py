@@ -482,12 +482,15 @@ def calculate_position_from_transactions(fund_code: str) -> dict:
             if shares > 0 and price > 0:
                 total_cost += shares * price
         elif trans_type == "sell":
-            if total_shares > 0:
+            if total_shares > 0 and shares > 0:
+                # 限制卖出份额不超过当前持仓
+                sell_shares = min(shares, total_shares)
                 # 按比例减少成本
-                if shares > 0 and total_shares >= shares:
-                    cost_per_share = total_cost / total_shares if total_shares > 0 else 0
-                    total_cost -= shares * cost_per_share
-                    total_shares -= shares
+                cost_per_share = total_cost / total_shares if total_shares > 0 else 0
+                total_cost -= sell_shares * cost_per_share
+                if total_cost < 0:
+                    total_cost = 0
+                total_shares -= sell_shares
             total_amount -= amount
             if total_amount < 0:
                 total_amount = 0

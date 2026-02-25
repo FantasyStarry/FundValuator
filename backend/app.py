@@ -203,6 +203,10 @@ def _analysis_cache_key(news_id: str) -> str:
     return f"news:analysis:{news_id}"
 
 
+def _analysis_lock_key(news_id: str) -> str:
+    return f"news:analysis:lock:{news_id}"
+
+
 async def _redis_get_json(key: str) -> Optional[List[dict]]:
     if not redis_client:
         return None
@@ -254,14 +258,26 @@ async def _trigger_news_analysis(items: List[dict]):
     if not news_ids:
         return
         
-    # Check what's already analyzed
+    # Check what's already analyzed or being analyzed
     analysis_map = {}
     missing_ids = []
     if redis_client:
+        pipe = redis_client.pipeline()
         for news_id in news_ids:
-            cached = await _redis_get_obj(_analysis_cache_key(news_id))
+            pipe.get(_analysis_cache_key(news_id))
+            pipe.get(_analysis_lock_key(news_id))
+        results = await pipe.execute()
+        
+        for i, news_id in enumerate(news_ids):
+            cached = results[i * 2]
+            locked = results[i * 2 + 1]
             if cached:
-                analysis_map[news_id] = cached
+                try:
+                    analysis_map[news_id] = json.loads(cached)
+                except json.JSONDecodeError:
+                    missing_ids.append(news_id)
+            elif locked:
+                missing_ids.append(news_id)
             else:
                 missing_ids.append(news_id)
     else:
@@ -269,10 +285,20 @@ async def _trigger_news_analysis(items: List[dict]):
         
     if missing_ids:
         db_map = list_news_analysis(missing_ids)
+        for news_id, analysis in db_map.items():
+            analysis_map[news_id] = analysis
+            if redis_client:
+                await _redis_set_obj(_analysis_cache_key(news_id), analysis, NEWS_CACHE_TTL_SEC)
         missing_ids = [nid for nid in missing_ids if nid not in db_map]
         
     if not missing_ids:
         return
+
+    # Acquire locks for items to analyze
+    if redis_client:
+        for news_id in missing_ids:
+            lock_key = _analysis_lock_key(news_id)
+            await redis_client.set(lock_key, "1", ex=300)
 
     # Process missing items
     semaphore = asyncio.Semaphore(3)
@@ -299,8 +325,10 @@ async def _trigger_news_analysis(items: List[dict]):
                 upsert_news_analysis(news_id, normalized, now_iso)
                 if redis_client:
                     await _redis_set_obj(_analysis_cache_key(news_id), normalized, NEWS_CACHE_TTL_SEC)
+                    await redis_client.delete(_analysis_lock_key(news_id))
             except Exception:
-                pass
+                if redis_client:
+                    await redis_client.delete(_analysis_lock_key(news_id))
                 
     await asyncio.gather(*[run_one(news_id) for news_id in missing_ids], return_exceptions=True)
 

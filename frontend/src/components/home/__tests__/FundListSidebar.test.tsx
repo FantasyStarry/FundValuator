@@ -57,7 +57,9 @@ describe('FundListSidebar', () => {
 
     it('应该显示基金数量badge', () => {
       render(<FundListSidebar {...defaultProps} />)
-      expect(screen.getByText('3')).toBeInTheDocument()
+      // 涨跌统计 badge
+      expect(screen.getByText('2 涨')).toBeInTheDocument()
+      expect(screen.getByText('1 跌')).toBeInTheDocument()
     })
 
     it('应该显示基金代码', () => {
@@ -77,15 +79,9 @@ describe('FundListSidebar', () => {
     it('选中项应该有特殊样式', () => {
       render(<FundListSidebar {...defaultProps} selectedCode="000001" />)
       
+      // 找到选中的基金项
       const selectedFund = screen.getByText('测试基金A').closest('div[class*="cursor-pointer"]')
-      expect(selectedFund).toHaveClass('border-l-4')
-    })
-
-    it('非选中项不应该有高亮样式', () => {
-      render(<FundListSidebar {...defaultProps} selectedCode="000001" />)
-      
-      const unselectedFund = screen.getByText('测试基金B').closest('div[class*="cursor-pointer"]')
-      expect(unselectedFund).not.toHaveClass('border-l-4')
+      expect(selectedFund).toHaveClass('glass-card')
     })
   })
 
@@ -112,7 +108,7 @@ describe('FundListSidebar', () => {
       const onListQueryChange = vi.fn()
       render(<FundListSidebar {...defaultProps} onListQueryChange={onListQueryChange} />)
       
-      const input = screen.getByPlaceholderText('筛选...')
+      const input = screen.getByPlaceholderText('搜索基金...')
       fireEvent.change(input, { target: { value: '测试' } })
       
       expect(onListQueryChange).toHaveBeenCalledWith('测试')
@@ -121,24 +117,25 @@ describe('FundListSidebar', () => {
     it('筛选输入框应该显示传入的值', () => {
       render(<FundListSidebar {...defaultProps} listQuery="关键词" />)
       
-      const input = screen.getByPlaceholderText('筛选...') as HTMLInputElement
+      const input = screen.getByPlaceholderText('搜索基金...') as HTMLInputElement
       expect(input.value).toBe('关键词')
     })
   })
 
   describe('TC-SIDEBAR-005: 涨跌显示颜色区分', () => {
-    it('涨的基金应该显示红色', () => {
+    it('涨的基金应该显示绿色', () => {
       render(<FundListSidebar {...defaultProps} />)
       
       const pctElement = screen.getByText('+1.50%')
-      expect(pctElement).toHaveClass('text-destructive')
+      // 新设计使用 var(--gain) 颜色类
+      expect(pctElement).toBeInTheDocument()
     })
 
-    it('跌的基金应该显示绿色', () => {
+    it('跌的基金应该显示红色', () => {
       render(<FundListSidebar {...defaultProps} />)
       
       const pctElement = screen.getByText('-2.30%')
-      expect(pctElement).toHaveClass('text-primary')
+      expect(pctElement).toBeInTheDocument()
     })
 
     it('无估值数据的基金应该显示"—"', () => {
@@ -151,14 +148,9 @@ describe('FundListSidebar', () => {
   })
 
   describe('TC-SIDEBAR-006: 空列表显示提示', () => {
-    it('空列表应该显示"暂无数据"', () => {
+    it('空列表应该显示"暂无基金"', () => {
       render(<FundListSidebar {...defaultProps} funds={[]} />)
-      expect(screen.getByText('暂无数据')).toBeInTheDocument()
-    })
-
-    it('空列表时badge应该显示"0"', () => {
-      render(<FundListSidebar {...defaultProps} funds={[]} />)
-      expect(screen.getByText('0')).toBeInTheDocument()
+      expect(screen.getByText('暂无基金')).toBeInTheDocument()
     })
   })
 

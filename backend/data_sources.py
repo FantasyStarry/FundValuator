@@ -13,6 +13,9 @@ from .config import (
     get_deepseek_api_key,
     get_deepseek_base_url,
     get_deepseek_model,
+    get_mimo_api_key,
+    get_mimo_base_url,
+    get_mimo_model,
     get_news_keywords,
     get_news_rss_url,
 )
@@ -410,12 +413,12 @@ async def fetch_article_content(url: str, timeout: float = 10.0) -> Optional[str
 
 
 async def analyze_news_with_deepseek(title: str, content: str, source: Optional[str] = None) -> dict:
-    api_key = get_deepseek_api_key()
+    api_key = get_mimo_api_key()
     if not api_key:
-        raise ValueError("DEEPSEEK_API_KEY is required")
-    base_url = get_deepseek_base_url().rstrip("/")
-    model = get_deepseek_model()
-    url = f"{base_url}/v1/chat/completions"
+        raise ValueError("MIMO_API_KEY is required")
+    base_url = get_mimo_base_url().rstrip("/")
+    model = get_mimo_model()
+    url = f"{base_url}/chat/completions"
     system_prompt = "你是金融市场研究助手。输出严格的 JSON，不要包含多余文本。"
     user_prompt = (
         "请分析以下新闻，给出简洁总结、情绪判断、可能影响的资产或板块、置信度，以及重要性评分(0-10)。"
@@ -433,7 +436,7 @@ async def analyze_news_with_deepseek(title: str, content: str, source: Optional[
         "temperature": 0.2,
         "max_tokens": 800,
     }
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"api-key": api_key}
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()

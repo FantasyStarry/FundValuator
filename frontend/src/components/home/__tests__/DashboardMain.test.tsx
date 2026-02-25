@@ -96,7 +96,8 @@ describe('DashboardMain', () => {
     it('应该显示"今日收益"卡片', () => {
       render(<DashboardMain {...defaultProps} />)
       expect(screen.getByText('今日收益')).toBeInTheDocument()
-      expect(screen.getByText('+150.00')).toBeInTheDocument()
+      // 使用 getAllByText 因为可能有多个匹配
+      expect(screen.getAllByText('+150.00').length).toBeGreaterThan(0)
     })
 
     it('应该显示"数据来源"标签', () => {
@@ -106,22 +107,23 @@ describe('DashboardMain', () => {
 
     it('应该显示当日涨跌百分比', () => {
       render(<DashboardMain {...defaultProps} />)
-      expect(screen.getByText('+0.50%')).toBeInTheDocument()
+      // 当日涨跌显示为 +0.50% 当日
+      expect(screen.getByText(/0\.50%/)).toBeInTheDocument()
     })
   })
 
   describe('TC-MAIN-002: 收益正负颜色区分', () => {
-    it('正收益应该显示红色', () => {
+    it('正收益应该显示绿色（新设计）', () => {
       render(<DashboardMain {...defaultProps} />)
       
-      // 今日收益为正
+      // 今日收益为正，新设计使用 var(--gain) 颜色
       const incomeElements = screen.getAllByText('+150.00')
       incomeElements.forEach(el => {
-        expect(el).toHaveClass('text-destructive')
+        expect(el).toHaveClass('text-[var(--gain)]')
       })
     })
 
-    it('负收益应该显示绿色', () => {
+    it('负收益应该显示红色（新设计）', () => {
       const negativePortfolio = {
         ...mockPortfolio,
         total_daily_income: -100,
@@ -130,10 +132,10 @@ describe('DashboardMain', () => {
       
       render(<DashboardMain {...defaultProps} portfolio={negativePortfolio} />)
       
-      // 今日收益为负
+      // 今日收益为负，新设计使用 var(--loss) 颜色
       const incomeElements = screen.getAllByText('-100.00')
       incomeElements.forEach(el => {
-        expect(el).toHaveClass('text-foreground')
+        expect(el).toHaveClass('text-[var(--loss)]')
       })
     })
   })
@@ -225,7 +227,7 @@ describe('DashboardMain', () => {
 
     it('分时模式且无数据应该显示英文提示', () => {
       render(<DashboardMain {...defaultProps} chartPeriod="intraday" navItems={[]} />)
-      expect(screen.getByText('Market Not Open')).toBeInTheDocument()
+      expect(screen.getByText('Market Closed')).toBeInTheDocument()
     })
   })
 
@@ -234,7 +236,9 @@ describe('DashboardMain', () => {
       const onRefreshDetail = vi.fn()
       render(<DashboardMain {...defaultProps} onRefreshDetail={onRefreshDetail} />)
       
-      fireEvent.click(screen.getByText('刷新'))
+      // 有两个刷新按钮，点击第一个
+      const refreshButtons = screen.getAllByText('刷新')
+      fireEvent.click(refreshButtons[0])
       expect(onRefreshDetail).toHaveBeenCalled()
     })
   })
@@ -275,13 +279,13 @@ describe('DashboardMain', () => {
     it('股票涨跌颜色应该正确', () => {
       render(<DashboardMain {...defaultProps} />)
       
-      // 茅台涨 +1.12%
+      // 茅台涨 +1.12%，新设计使用 var(--gain)
       const upElement = screen.getByText('+1.12%')
-      expect(upElement).toHaveClass('text-destructive')
+      expect(upElement).toHaveClass('text-[var(--gain)]')
       
-      // 五粮液跌 -1.32%
+      // 五粮液跌 -1.32%，新设计使用 var(--loss)
       const downElement = screen.getByText('-1.32%')
-      expect(downElement).toHaveClass('text-primary')
+      expect(downElement).toHaveClass('text-[var(--loss)]')
     })
 
     it('无持仓数据时应该显示提示', () => {
@@ -314,7 +318,8 @@ describe('DashboardMain', () => {
 
     it('应该显示累计收益', () => {
       render(<DashboardMain {...defaultProps} />)
-      expect(screen.getByText('累计收益')).toBeInTheDocument()
+      const elements = screen.getAllByText('累计收益')
+      expect(elements.length).toBeGreaterThan(0)
     })
 
     it('应该显示持仓占比', () => {
@@ -324,7 +329,7 @@ describe('DashboardMain', () => {
 
     it('应该显示持仓模式badge', () => {
       render(<DashboardMain {...defaultProps} />)
-      expect(screen.getByText('金额持有')).toBeInTheDocument()
+      expect(screen.getByText('金额模式')).toBeInTheDocument()
     })
   })
 
@@ -348,15 +353,15 @@ describe('DashboardMain', () => {
     })
   })
 
-  describe('已更新badge', () => {
-    it('官方已更新时应该显示"已更新"badge', () => {
-      render(<DashboardMain {...defaultProps} portfolio={{ ...mockPortfolio, official_updated: true }} />)
-      expect(screen.getByText('已更新')).toBeInTheDocument()
+  describe('实时行情指示器', () => {
+    it('应该显示实时行情标签', () => {
+      render(<DashboardMain {...defaultProps} />)
+      expect(screen.getByText('实时行情')).toBeInTheDocument()
     })
 
-    it('官方未更新时不应该显示"已更新"badge', () => {
-      render(<DashboardMain {...defaultProps} portfolio={{ ...mockPortfolio, official_updated: false }} />)
-      expect(screen.queryByText('已更新')).not.toBeInTheDocument()
+    it('应该显示最后更新时间', () => {
+      render(<DashboardMain {...defaultProps} />)
+      expect(screen.getByText(/最后更新:/)).toBeInTheDocument()
     })
   })
 })

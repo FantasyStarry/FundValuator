@@ -116,7 +116,8 @@ describe('主页面集成测试', () => {
         render(<Home />)
       })
       
-      expect(screen.getByPlaceholderText('筛选...')).toBeInTheDocument()
+      // 更新为新的 placeholder 文本
+      expect(screen.getByPlaceholderText('搜索基金...')).toBeInTheDocument()
     })
 
     it('应该包含搜索输入框', async () => {
