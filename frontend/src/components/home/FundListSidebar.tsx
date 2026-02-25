@@ -107,7 +107,7 @@ const FundItem = ({
               ¥{(
                 fund.mode === "amount" 
                   ? fund.amount 
-                  : (fund as FundInfo & { computedAmount?: number }).computedAmount || fund.shares
+                  : (fund as FundInfo & { computedAmount?: number }).computedAmount ?? fund.shares
               ).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
             </span>
           </div>

@@ -290,7 +290,7 @@ export const DashboardMain = ({
                       {formatNumber(
                         selectedFund.mode === "amount" 
                           ? selectedFund.amount 
-                          : selectedFund.shares * (selectedFund.nav || detail?.fund_gz_nav || (navItems.length ? navItems[navItems.length - 1].nav : 0) || 0),
+                          : selectedFund.shares * (selectedFund.nav ?? detail?.fund_gz_nav ?? (navItems.length ? navItems[navItems.length - 1].nav : 0)),
                         2
                       )}
                     </div>
@@ -299,7 +299,7 @@ export const DashboardMain = ({
                   <div className="p-3 rounded-lg bg-[var(--muted)]">
                     <div className="text-[10px] text-[var(--muted-foreground)]">持仓成本</div>
                     <div className="text-lg font-semibold font-mono mt-1">
-                      {formatNumber(selectedFund.cost * (selectedFund.mode === "amount" ? 1 : (selectedFund.nav || detail?.fund_gz_nav || (navItems.length ? navItems[navItems.length - 1].nav : 0) || 0)), 2)}
+                      {formatNumber(selectedFund.mode === "amount" ? selectedFund.cost : selectedFund.cost * selectedFund.shares, 2)}
                     </div>
                   </div>
 
@@ -323,7 +323,7 @@ export const DashboardMain = ({
                         const currentVal =
                           selectedFund.mode === "amount"
                             ? selectedFund.amount + (detail?.total_income || 0)
-                            : selectedFund.shares * (selectedFund.nav || detail?.fund_gz_nav || (navItems.length ? navItems[navItems.length - 1].nav : 0) || 0);
+                            : selectedFund.shares * (selectedFund.nav ?? detail?.fund_gz_nav ?? (navItems.length ? navItems[navItems.length - 1].nav : 0));
                         const ratio = portfolio?.total_amount ? (currentVal / portfolio.total_amount) * 100 : 0;
                         return formatPct(ratio);
                       })()}

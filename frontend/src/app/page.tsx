@@ -155,7 +155,7 @@ export default function Home() {
       ...fund,
       computedAmount: fund.mode === "amount" 
         ? fund.amount 
-        : fund.shares * (fund.nav || 0)
+        : fund.shares * (fund.nav ?? 0)
     }));
   }, [funds]);
 
