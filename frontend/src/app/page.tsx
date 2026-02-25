@@ -150,6 +150,15 @@ export default function Home() {
 
   const selectedFund = useMemo(() => funds.find((item) => item.code === selectedCode), [funds, selectedCode]);
 
+  const fundsWithComputed = useMemo(() => {
+    return funds.map(fund => ({
+      ...fund,
+      computedAmount: fund.mode === "amount" 
+        ? fund.amount 
+        : fund.shares * (fund.nav || 0)
+    }));
+  }, [funds]);
+
   // WebSocket for real-time estimate updates
   const { lastMessage: estimateMessage } = useWebSocket<WSEstimateUpdate>(
     selectedCode ? `/ws/estimate/${selectedCode}` : "",
@@ -651,7 +660,7 @@ export default function Home() {
       <div className="flex-1 overflow-hidden">
         <div className="mx-auto w-full max-w-[1600px] px-6 py-6 h-[calc(100vh-80px)] grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)_340px] gap-8">
           <FundListSidebar
-            funds={funds}
+            funds={fundsWithComputed}
             selectedCode={selectedCode}
             listQuery={listQuery}
             onListQueryChange={setListQuery}
@@ -682,8 +691,6 @@ export default function Home() {
             newsItems={newsItems}
             selectedNewsKey={selectedNewsKey}
             onSelectNewsKey={setSelectedNewsKey}
-            analysisCache={analysisCache}
-            newsLoading={newsLoading}
           />
         </div>
       </div>

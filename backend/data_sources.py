@@ -77,7 +77,12 @@ async def fetch_fund_gz(code: str) -> Optional[dict]:
     if not match:
         return None
     try:
-        return json.loads(match.group(0))
+        data = json.loads(match.group(0))
+        return {
+            "fundcode": data.get("fundcode"),
+            "gsz": data.get("gsz"),
+            "gszzl": data.get("gszzl"),
+        }
     except json.JSONDecodeError:
         return None
 

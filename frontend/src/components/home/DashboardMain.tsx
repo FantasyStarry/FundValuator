@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Activity, BarChart3, Clock, MoreHorizontal, Plus, RefreshCw, TrendingDown, TrendingUp, Trash2, Wallet, Zap } from "lucide-react";
+import { Activity, BarChart3, Clock, Plus, RefreshCw, Trash2, Wallet } from "lucide-react";
 import type { EChartsOption } from "echarts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,6 @@ type DashboardMainProps = {
   onOpenTransactionSheet: () => void;
 };
 
-// Animated number component with flash effect
 const AnimatedNumber = ({ 
   value, 
   className, 
@@ -46,7 +45,7 @@ const AnimatedNumber = ({
   useEffect(() => {
     if (prevValue.current !== value) {
       setFlash(true);
-      const timer = setTimeout(() => setFlash(false), 600);
+      const timer = setTimeout(() => setFlash(false), 400);
       prevValue.current = value;
       return () => clearTimeout(timer);
     }
@@ -54,10 +53,8 @@ const AnimatedNumber = ({
 
   return (
     <span className={cn(
-      "transition-all duration-300",
-      flash && "flash-update scale-105",
-      isPositive === true && "text-[var(--gain)]",
-      isPositive === false && "text-[var(--loss)]",
+      "transition-all duration-200",
+      flash && "flash-update",
       className
     )}>
       {prefix}{value}
@@ -65,73 +62,42 @@ const AnimatedNumber = ({
   );
 };
 
-// Live indicator component
 const LiveIndicator = ({ label }: { label: string }) => (
   <div className="flex items-center gap-2">
     <div className="live-dot" />
-    <span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase tracking-wider">
+    <span className="text-xs text-[var(--muted-foreground)]">
       {label}
     </span>
   </div>
 );
 
-// Metric card component
-const MetricCard = ({ 
+const StatCard = ({ 
   label, 
   value, 
   subValue, 
-  icon: Icon, 
   isPositive,
-  prefix = "",
-  trend
+  prefix = ""
 }: { 
   label: string; 
   value: string | number;
   subValue?: string;
-  icon?: React.ElementType;
   isPositive?: boolean | null;
   prefix?: string;
-  trend?: "up" | "down";
 }) => (
-  <div className="glass-card rounded-xl p-5 hover-lift group">
-    <div className="flex items-start justify-between mb-3">
-      <span className="text-xs font-medium text-[var(--muted-foreground)] uppercase tracking-wide">
-        {label}
-      </span>
-      {Icon && (
-        <div className={cn(
-          "w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300",
-          isPositive === true ? "bg-[var(--gain)]/10 text-[var(--gain)]" : 
-          isPositive === false ? "bg-[var(--loss)]/10 text-[var(--loss)]" : 
-          "bg-[var(--muted)] text-[var(--muted-foreground)]"
-        )}>
-          <Icon className="w-4 h-4" />
-        </div>
+  <div className="stat-card">
+    <div className="text-xs text-[var(--muted-foreground)] mb-1">{label}</div>
+    <AnimatedNumber 
+      value={value} 
+      prefix={prefix}
+      isPositive={isPositive}
+      className={cn(
+        "text-lg font-semibold font-mono block",
+        isPositive === true && "text-[var(--gain)]",
+        isPositive === false && "text-[var(--loss)]"
       )}
-    </div>
-    <div className="space-y-1">
-      <AnimatedNumber 
-        value={value} 
-        prefix={prefix}
-        isPositive={isPositive}
-        className={cn(
-          "text-2xl font-bold font-mono tracking-tight block",
-          isPositive === true && "text-[var(--gain)]",
-          isPositive === false && "text-[var(--loss)]"
-        )}
-      />
-      {subValue && (
-        <span className="text-xs text-[var(--muted-foreground)]">{subValue}</span>
-      )}
-    </div>
-    {trend && (
-      <div className={cn(
-        "mt-3 flex items-center gap-1 text-xs font-medium",
-        trend === "up" ? "text-[var(--gain)]" : "text-[var(--loss)]"
-      )}>
-        {trend === "up" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-        <span>{trend === "up" ? "+" : "-"}{(Math.random() * 2).toFixed(2)}%</span>
-      </div>
+    />
+    {subValue && (
+      <div className="text-xs text-[var(--muted-foreground)] mt-1">{subValue}</div>
     )}
   </div>
 );
@@ -150,148 +116,93 @@ export const DashboardMain = ({
   onOpenTransactionSheet,
 }: DashboardMainProps) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
-
-  // Auto refresh every 5 seconds
-  useEffect(() => {
-    setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
-    const interval = setInterval(() => {
-      setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
     onRefreshDetail();
-    setTimeout(() => setIsRefreshing(false), 800);
+    setTimeout(() => setIsRefreshing(false), 600);
   };
 
   return (
-    <main className="flex flex-col gap-6 min-h-0 overflow-y-auto custom-scrollbar pr-1">
-      {/* Header with live indicator */}
+    <main className="flex flex-col gap-5 min-h-0 overflow-y-auto custom-scrollbar pr-1">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <LiveIndicator label="实时行情" />
-          {lastUpdate && (
-            <span className="text-xs text-[var(--muted-foreground)] font-mono">
-              最后更新: {lastUpdate}
-            </span>
-          )}
-        </div>
+        <LiveIndicator label="实时" />
         <Button 
           variant="ghost" 
           size="sm" 
           onClick={handleRefresh}
-          className="h-8 gap-2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+          className="h-8 gap-1.5 text-[var(--muted-foreground)]"
         >
           <RefreshCw className={cn("w-3.5 h-3.5", isRefreshing && "animate-spin")} />
           刷新
         </Button>
       </div>
 
-      {/* Portfolio Overview Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
-        <MetricCard
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard
           label="总资产"
           value={formatNumber(portfolio?.total_amount)}
           subValue="实时估值"
-          icon={Wallet}
         />
-        <MetricCard
+        <StatCard
           label="今日收益"
           value={formatNumber(portfolio?.total_daily_income)}
           prefix={(portfolio?.total_daily_income ?? 0) > 0 ? "+" : ""}
-          subValue={`${(portfolio?.daily_pct ?? 0) > 0 ? "+" : ""}${formatPct(portfolio?.daily_pct, 2)} 当日`}
-          icon={(portfolio?.daily_pct ?? 0) >= 0 ? TrendingUp : TrendingDown}
+          subValue={`${(portfolio?.daily_pct ?? 0) > 0 ? "+" : ""}${formatPct(portfolio?.daily_pct, 2)}`}
           isPositive={(portfolio?.total_daily_income ?? 0) >= 0}
         />
-        <MetricCard
+        <StatCard
           label="持有收益"
           value={formatNumber(portfolio?.total_holding_income)}
           prefix={(portfolio?.total_holding_income ?? 0) > 0 ? "+" : ""}
-          subValue="累计收益"
-          icon={BarChart3}
+          subValue="累计"
           isPositive={(portfolio?.total_holding_income ?? 0) >= 0}
         />
-        <div className="glass-card rounded-xl p-5 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-[var(--muted-foreground)] uppercase tracking-wide">
-              数据来源
-            </span>
-            <Zap className="w-4 h-4 text-[var(--primary)]" />
-          </div>
-          <div className="mt-3">
-            <div className="text-base font-semibold">
-              {resolveSourceLabel(portfolio?.used_source, portfolio?.holiday_mode)}
-            </div>
-            {portfolio?.transition_progress !== undefined &&
-              portfolio?.transition_progress !== null &&
-              portfolio.transition_progress < 1 && (
-                <div className="mt-3">
-                  <div className="flex justify-between text-xs mb-1.5">
-                    <span className="text-[var(--muted-foreground)]">过渡进度</span>
-                    <span className="text-[var(--primary)] font-mono">
-                      {(portfolio.transition_progress * 100).toFixed(0)}%
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 bg-[var(--muted)] rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-gradient-to-r from-[var(--primary)] to-[#00ff9d] rounded-full transition-all duration-500"
-                      style={{ width: `${portfolio.transition_progress * 100}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-          </div>
-        </div>
+        <StatCard
+          label="数据来源"
+          value={resolveSourceLabel(portfolio?.used_source, portfolio?.holiday_mode)}
+        />
       </div>
 
-      {/* Selected Fund Section */}
-      <div className="space-y-6 slide-up">
-        {/* Fund Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-1 h-12 bg-gradient-to-b from-[var(--primary)] to-transparent rounded-full" />
-            <div>
-              <h2 className="text-xl font-bold tracking-tight">
-                {selectedFund ? selectedFund.name : "请选择基金"}
-              </h2>
-              <div className="flex items-center gap-3 mt-1">
-                {selectedFund && (
-                  <Badge variant="outline" className="font-mono text-xs bg-[var(--muted)]/50 border-[var(--border)]">
-                    {selectedFund.code}
-                  </Badge>
-                )}
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {selectedFund ? selectedFund.name : "请选择基金"}
+            </h2>
+            {selectedFund && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs text-[var(--muted-foreground)] font-mono">{selectedFund.code}</span>
+                <span className="text-xs text-[var(--muted-foreground)]">•</span>
                 <span className="text-xs text-[var(--muted-foreground)]">
                   {resolveSourceLabel(detail?.estimate_source, detail?.holiday_mode)}
                 </span>
               </div>
-            </div>
+            )}
           </div>
           <div className="flex gap-2">
             <Button 
               variant="outline" 
               size="sm" 
               onClick={handleRefresh} 
-              className="h-9 gap-2 bg-[var(--card)] border-[var(--border)] hover:bg-[var(--muted)]"
+              className="h-8"
             >
-              <RefreshCw className={cn("w-3.5 h-3.5", isRefreshing && "animate-spin")} />
+              <RefreshCw className={cn("w-3.5 h-3.5 mr-1", isRefreshing && "animate-spin")} />
               刷新
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onDeleteFund}
-              className="h-9 gap-2 text-[var(--loss)] border-[var(--loss)]/30 hover:bg-[var(--loss)]/10 hover:text-[var(--loss)]"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              删除
-            </Button>
+            {selectedFund && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onDeleteFund}
+                className="h-8 text-[var(--loss)] border-[var(--loss)]/30 hover:bg-[var(--loss)]/10"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+            )}
           </div>
         </div>
 
-        {/* Fund Metrics Grid */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
             { label: "估算收益", value: formatNumber(detail?.estimate_income), isPositive: (detail?.estimate_income ?? 0) >= 0, prefix: (detail?.estimate_income ?? 0) > 0 ? "+" : "" },
@@ -301,21 +212,14 @@ export const DashboardMain = ({
             { label: "官方净值", value: formatNumber(detail?.fund_gz_nav), isPositive: null },
             { label: "净值日期", value: detail?.real_nav_date ?? "—", isPositive: null },
           ].map((item, i) => (
-            <div 
-              key={i} 
-              className={cn(
-                "p-4 rounded-xl glass-card hover-lift transition-all",
-              )}
-            >
-              <div className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider mb-2">
-                {item.label}
-              </div>
+            <div key={i} className="stat-card">
+              <div className="text-xs text-[var(--muted-foreground)] mb-1">{item.label}</div>
               <AnimatedNumber
                 value={item.value}
                 prefix={item.prefix}
                 isPositive={item.isPositive}
                 className={cn(
-                  "text-base font-bold font-mono tracking-tight",
+                  "text-base font-semibold font-mono",
                   item.isPositive === true && "text-[var(--gain)]",
                   item.isPositive === false && "text-[var(--loss)]"
                 )}
@@ -324,160 +228,124 @@ export const DashboardMain = ({
           ))}
         </div>
 
-        {/* Charts and Holdings Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* NAV Chart */}
-          <Card className="lg:col-span-2 glass-card border-0 overflow-hidden">
-            <CardHeader className="pb-3 border-b border-[var(--border)] bg-[var(--muted)]/30">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <Card className="lg:col-span-2 border-[var(--border)]">
+            <CardHeader className="pb-2 px-4">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-[var(--primary)]" />
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Activity className="w-4 h-4" />
                   净值走势
                 </CardTitle>
-                <div className="flex bg-[var(--card)] p-0.5 rounded-lg border border-[var(--border)]">
+                <div className="flex gap-1">
                   {(["intraday", "1m", "3m", "1y"] as const).map((p) => (
                     <button
                       key={p}
                       onClick={() => onChartPeriodChange(p)}
                       className={cn(
-                        "px-3 py-1 text-[11px] font-medium rounded-md transition-all duration-200",
+                        "px-2.5 py-1 text-xs rounded-md transition-colors",
                         chartPeriod === p 
-                          ? "bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm" 
-                          : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                          ? "bg-[var(--primary)] text-white" 
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
                       )}
                     >
-                      {{ intraday: "分时", "1m": "近1月", "3m": "近3月", "1y": "近1年" }[p]}
+                      {{ intraday: "分时", "1m": "1月", "3m": "3月", "1y": "1年" }[p]}
                     </button>
                   ))}
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0 relative">
+            <CardContent className="p-0">
               {chartPeriod === "intraday" && !navItems.length ? (
-                <div className="h-[380px] flex flex-col items-center justify-center text-[var(--muted-foreground)] gap-4">
-                  <div className="w-16 h-16 rounded-2xl bg-[var(--muted)] flex items-center justify-center">
-                    <Clock className="w-6 h-6 opacity-50" />
-                  </div>
-                  <div className="text-center">
-                    <div className="text-sm font-medium">暂未开盘</div>
-                    <div className="text-xs opacity-50 mt-1 font-mono">Market Closed</div>
-                  </div>
+                <div className="h-[320px] flex flex-col items-center justify-center text-[var(--muted-foreground)]">
+                  <Clock className="w-8 h-8 mb-2 opacity-30" />
+                  <div className="text-sm">暂未开盘</div>
                 </div>
               ) : chartOption ? (
-                <FundChart option={chartOption} className="h-[380px] w-full" />
+                <FundChart option={chartOption} className="h-[320px] w-full" />
               ) : (
-                <div className="h-[380px] flex items-center justify-center text-[var(--muted-foreground)]">
-                  <div className="text-center">
-                    <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                    <div className="text-sm">暂无净值数据</div>
-                  </div>
+                <div className="h-[320px] flex items-center justify-center text-[var(--muted-foreground)]">
+                  <div className="text-sm">暂无数据</div>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Holdings Overview */}
-          <Card className="glass-card border-0 flex flex-col">
-            <CardHeader className="pb-3 border-b border-[var(--border)] bg-[var(--muted)]/30">
+          <Card className="border-[var(--border)]">
+            <CardHeader className="pb-2 px-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <CardTitle className="text-sm font-semibold">持仓概况</CardTitle>
-                  {selectedFund && (
-                    <Badge variant="outline" className="text-[10px] h-5 px-2 font-normal bg-[var(--card)] border-[var(--border)]">
-                      {selectedFund.mode === "amount" ? "金额模式" : "份额模式"}
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex gap-1">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-7 w-7 text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-[var(--primary)]/10"
-                    onClick={onOpenTransactionSheet}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-7 w-7 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-                    onClick={onOpenHoldingSheet}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </div>
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Wallet className="w-4 h-4" />
+                  持仓概况
+                </CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="flex-1 p-5">
+            <CardContent className="p-4">
               {selectedFund ? (
-                <div className="grid grid-cols-2 gap-3 h-full">
-                  <div className="p-4 rounded-xl bg-[var(--muted)]/50 border border-[var(--border)]/50 flex flex-col">
-                    <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wide mb-2">
-                      {selectedFund.mode === "amount" ? "持有金额" : "持有份额"}
-                    </span>
-                    <span className="text-xl font-mono font-bold">
-                      {formatNumber(selectedFund.mode === "amount" ? selectedFund.amount : selectedFund.shares, 2)}
-                    </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-[var(--muted)]">
+                    <div className="text-[10px] text-[var(--muted-foreground)]">
+                      持有金额
+                    </div>
+                    <div className="text-lg font-semibold font-mono mt-1">
+                      {formatNumber(
+                        selectedFund.mode === "amount" 
+                          ? selectedFund.amount 
+                          : selectedFund.shares * (selectedFund.nav || detail?.fund_gz_nav || (navItems.length ? navItems[navItems.length - 1].nav : 0) || 0),
+                        2
+                      )}
+                    </div>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-[var(--muted)]/50 border border-[var(--border)]/50 flex flex-col">
-                    <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wide mb-2">
-                      持仓成本
-                    </span>
-                    <span className="text-xl font-mono font-bold text-[var(--muted-foreground)]">
-                      {formatNumber(selectedFund.cost, 4)}
-                    </span>
+                  <div className="p-3 rounded-lg bg-[var(--muted)]">
+                    <div className="text-[10px] text-[var(--muted-foreground)]">持仓成本</div>
+                    <div className="text-lg font-semibold font-mono mt-1">
+                      {formatNumber(selectedFund.cost * (selectedFund.mode === "amount" ? 1 : (selectedFund.nav || detail?.fund_gz_nav || (navItems.length ? navItems[navItems.length - 1].nav : 0) || 0)), 2)}
+                    </div>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-[var(--muted)]/50 border border-[var(--border)]/50 flex flex-col">
-                    <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wide mb-2">
-                      累计收益
-                    </span>
+                  <div className="p-3 rounded-lg bg-[var(--muted)]">
+                    <div className="text-[10px] text-[var(--muted-foreground)]">累计收益</div>
                     <AnimatedNumber
                       value={formatNumber(detail?.total_income)}
                       prefix={(detail?.total_income ?? 0) > 0 ? "+" : ""}
                       isPositive={(detail?.total_income ?? 0) >= 0}
                       className={cn(
-                        "text-xl font-mono font-bold",
+                        "text-lg font-semibold font-mono mt-1",
                         (detail?.total_income ?? 0) >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]"
                       )}
                     />
                   </div>
 
-                  <div className="p-4 rounded-xl bg-[var(--muted)]/50 border border-[var(--border)]/50 flex flex-col">
-                    <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wide mb-2">
-                      持仓占比
-                    </span>
-                    <span className="text-xl font-mono font-bold">
+                  <div className="p-3 rounded-lg bg-[var(--muted)]">
+                    <div className="text-[10px] text-[var(--muted-foreground)]">持仓占比</div>
+                    <div className="text-lg font-semibold font-mono mt-1">
                       {(() => {
                         const currentVal =
                           selectedFund.mode === "amount"
                             ? selectedFund.amount + (detail?.total_income || 0)
-                            : selectedFund.shares * (detail?.fund_gz_nav || (navItems.length ? navItems[navItems.length - 1].nav : 0) || 0);
+                            : selectedFund.shares * (selectedFund.nav || detail?.fund_gz_nav || (navItems.length ? navItems[navItems.length - 1].nav : 0) || 0);
                         const ratio = portfolio?.total_amount ? (currentVal / portfolio.total_amount) * 100 : 0;
                         return formatPct(ratio);
                       })()}
-                    </span>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-full text-[var(--muted-foreground)]">
-                  <Wallet className="w-10 h-10 mb-3 opacity-30" />
-                  <div className="text-sm">请选择基金查看详情</div>
+                <div className="flex flex-col items-center justify-center h-32 text-[var(--muted-foreground)]">
+                  <div className="text-sm">请选择基金</div>
                 </div>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Holdings Table */}
-        <Card className="glass-card border-0">
-          <CardHeader className="pb-0 border-b border-[var(--border)] bg-[var(--muted)]/30 pt-5 px-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-1 h-5 bg-gradient-to-b from-[var(--primary)] to-transparent rounded-full" />
-              <h3 className="font-semibold text-sm">重仓股票明细</h3>
+        <Card className="border-[var(--border)]">
+          <CardHeader className="pb-2 px-4">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" />
+              <h3 className="font-medium text-sm">重仓股票</h3>
               {detail?.components && detail.components.length > 0 && (
-                <Badge variant="outline" className="text-[10px] bg-[var(--card)] border-[var(--border)]">
+                <Badge variant="outline" className="text-[10px]">
                   {detail.components.length} 只
                 </Badge>
               )}
@@ -487,37 +355,31 @@ export const DashboardMain = ({
             {detail && detail.components.length ? (
               <Table>
                 <TableHeader>
-                  <TableRow className="hover:bg-transparent border-[var(--border)] bg-[var(--muted)]/20">
-                    <TableHead className="pl-6 h-11 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">股票代码</TableHead>
-                    <TableHead className="h-11 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">名称</TableHead>
-                    <TableHead className="h-11 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">权重</TableHead>
-                    <TableHead className="h-11 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">价格</TableHead>
-                    <TableHead className="text-right pr-6 h-11 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">涨跌幅</TableHead>
+                  <TableRow className="hover:bg-transparent border-[var(--border)] bg-[var(--muted)]/30">
+                    <TableHead className="pl-4 h-10 text-xs text-[var(--muted-foreground)]">代码</TableHead>
+                    <TableHead className="h-10 text-xs text-[var(--muted-foreground)]">名称</TableHead>
+                    <TableHead className="h-10 text-xs text-[var(--muted-foreground)]">权重</TableHead>
+                    <TableHead className="h-10 text-xs text-[var(--muted-foreground)]">价格</TableHead>
+                    <TableHead className="text-right pr-4 h-10 text-xs text-[var(--muted-foreground)]">涨跌幅</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {detail.components.map((item, idx) => (
-                    <TableRow 
-                      key={item.stock_code} 
-                      className="border-[var(--border)] hover:bg-[var(--muted)]/30 transition-colors"
-                      style={{ animationDelay: `${idx * 50}ms` }}
-                    >
-                      <TableCell className="pl-6 font-mono text-xs text-[var(--muted-foreground)]">
+                  {detail.components.map((item) => (
+                    <TableRow key={item.stock_code} className="border-[var(--border)] hover:bg-[var(--muted)]/30">
+                      <TableCell className="pl-4 font-mono text-xs text-[var(--muted-foreground)]">
                         {item.stock_code}
                       </TableCell>
                       <TableCell className="font-medium text-sm">{item.stock_name}</TableCell>
                       <TableCell className="font-mono text-sm">{formatPct(item.weight)}</TableCell>
                       <TableCell className="font-mono text-sm">{formatNumber(item.price)}</TableCell>
-                      <TableCell className="text-right pr-6">
+                      <TableCell className="text-right pr-4">
                         <AnimatedNumber
                           value={formatPct(item.change_pct)}
                           prefix={item.change_pct > 0 ? "+" : ""}
                           isPositive={item.change_pct >= 0}
                           className={cn(
-                            "font-mono font-bold text-sm inline-flex items-center gap-1 px-2 py-0.5 rounded",
-                            item.change_pct >= 0 
-                              ? "text-[var(--gain)] bg-[var(--gain)]/10" 
-                              : "text-[var(--loss)] bg-[var(--loss)]/10"
+                            "font-mono font-semibold text-sm",
+                            item.change_pct >= 0 ? "text-[var(--gain)]" : "text-[var(--loss)]"
                           )}
                         />
                       </TableCell>
@@ -526,15 +388,13 @@ export const DashboardMain = ({
                 </TableBody>
               </Table>
             ) : (
-              <div className="flex flex-col items-center justify-center py-16 text-[var(--muted-foreground)]">
-                <BarChart3 className="w-10 h-10 mb-3 opacity-30" />
+              <div className="flex flex-col items-center justify-center py-12 text-[var(--muted-foreground)]">
                 <div className="text-sm">暂无持仓数据</div>
               </div>
             )}
           </CardContent>
         </Card>
       </div>
-      <div className="h-6" />
     </main>
   );
 };

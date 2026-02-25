@@ -595,6 +595,7 @@ async def api_list_funds(keyword: str = "") -> List[FundInfo]:
         if not isinstance(res, Exception) and res:
             try:
                 funds[i].estimate_pct = float(res.get("gszzl", 0))
+                funds[i].nav = float(res.get("gsz")) if res.get("gsz") else None
             except (ValueError, TypeError):
                 pass
                 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ChevronRight, Search, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { ChevronRight, Search, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { FundInfo } from "@/components/home/types";
 
 type FundListSidebarProps = {
-  funds: FundInfo[];
+  funds: (FundInfo & { computedAmount?: number })[];
   selectedCode: string;
   listQuery: string;
   onListQueryChange: (value: string) => void;
@@ -17,7 +17,6 @@ type FundListSidebarProps = {
   onOpenHoldingSheet: () => void;
 };
 
-// Animated percentage component
 const AnimatedPercent = ({ value }: { value: number | null }) => {
   const [flash, setFlash] = useState(false);
   const prevValue = useRef(value);
@@ -25,7 +24,7 @@ const AnimatedPercent = ({ value }: { value: number | null }) => {
   useEffect(() => {
     if (prevValue.current !== value) {
       setFlash(true);
-      const timer = setTimeout(() => setFlash(false), 500);
+      const timer = setTimeout(() => setFlash(false), 400);
       prevValue.current = value;
       return () => clearTimeout(timer);
     }
@@ -37,11 +36,11 @@ const AnimatedPercent = ({ value }: { value: number | null }) => {
   return (
     <div
       className={cn(
-        "flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-sm font-bold transition-all duration-300",
-        flash && "scale-110",
+        "flex items-center gap-1 px-2 py-0.5 rounded font-mono text-xs font-semibold",
+        flash && "flash-update",
         isPositive 
-          ? "text-[var(--gain)] bg-[var(--gain)]/10" 
-          : "text-[var(--loss)] bg-[var(--loss)]/10"
+          ? "text-[var(--gain)]" 
+          : "text-[var(--loss)]"
       )}
     >
       {isPositive ? (
@@ -54,7 +53,6 @@ const AnimatedPercent = ({ value }: { value: number | null }) => {
   );
 };
 
-// Fund item component
 const FundItem = ({ 
   fund, 
   isSelected, 
@@ -67,24 +65,16 @@ const FundItem = ({
   return (
     <div
       className={cn(
-        "group relative p-3 rounded-xl cursor-pointer transition-all duration-300 overflow-hidden",
+        "p-3 rounded-lg cursor-pointer transition-colors",
         isSelected 
-          ? "glass-card" 
-          : "hover:bg-[var(--muted)]/50"
+          ? "bg-[var(--primary)] text-white" 
+          : "hover:bg-[var(--muted)]"
       )}
       onClick={onClick}
     >
-      {/* Selection indicator */}
-      {isSelected && (
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[var(--primary)] to-[var(--primary)]/30 rounded-r-full" />
-      )}
-      
-      <div className="flex justify-between items-start mb-2">
+      <div className="flex justify-between items-start mb-1">
         <div className="flex-1 min-w-0 pr-2">
-          <h3 className={cn(
-            "font-medium text-sm truncate transition-colors",
-            isSelected ? "text-[var(--foreground)]" : "text-[var(--foreground)]/80"
-          )}>
+          <h3 className="font-medium text-sm truncate">
             {fund.name}
           </h3>
         </div>
@@ -94,32 +84,31 @@ const FundItem = ({
       <div className="flex justify-between items-center">
         <Badge 
           variant="outline" 
-          className="text-[10px] font-mono bg-[var(--muted)]/30 border-[var(--border)]/50 text-[var(--muted-foreground)]"
+          className={cn(
+            "text-[10px] font-mono",
+            isSelected ? "bg-white/20 border-white/30 text-white" : "bg-[var(--muted)] border-transparent"
+          )}
         >
           {fund.code}
         </Badge>
         <ChevronRight 
           className={cn(
-            "w-4 h-4 text-[var(--muted-foreground)] transition-all duration-300",
-            isSelected 
-              ? "opacity-100 translate-x-0 text-[var(--primary)]" 
-              : "opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0"
+            "w-4 h-4",
+            isSelected ? "text-white/80" : "text-[var(--muted-foreground)]"
           )}
         />
       </div>
       
-      {/* Holding info */}
       {(fund.amount > 0 || fund.shares > 0) && (
-        <div className="mt-2 pt-2 border-t border-[var(--border)]/30">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-[var(--muted-foreground)]">
-              {fund.mode === "amount" ? "持有金额" : "持有份额"}
-            </span>
+        <div className="mt-2 pt-2 border-t border-current/10">
+          <div className="flex items-center justify-between text-xs opacity-80">
+            <span>持有金额</span>
             <span className="font-mono font-medium">
-              {fund.mode === "amount" 
-                ? `¥${fund.amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`
-                : fund.shares.toLocaleString('zh-CN', { minimumFractionDigits: 2 })
-              }
+              ¥{(
+                fund.mode === "amount" 
+                  ? fund.amount 
+                  : (fund as FundInfo & { computedAmount?: number }).computedAmount || fund.shares
+              ).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
@@ -136,43 +125,34 @@ export const FundListSidebar = ({
   onSelectCode,
   onOpenHoldingSheet,
 }: FundListSidebarProps) => {
-  // Calculate total stats
   const totalFunds = funds.length;
   const gainCount = funds.filter(f => (f.estimate_pct ?? 0) >= 0).length;
   const lossCount = totalFunds - gainCount;
 
   return (
-    <aside className="flex flex-col min-h-0 rounded-2xl glass-card overflow-hidden">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-[var(--border)] bg-[var(--muted)]/30">
+    <aside className="flex flex-col min-h-0 rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+      <div className="px-4 py-3 border-b border-[var(--border)]">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <Wallet className="w-4 h-4 text-[var(--primary)]" />
-            <span className="font-semibold text-sm tracking-tight">基金列表</span>
+            <Wallet className="w-4 h-4" />
+            <span className="font-medium text-sm">基金</span>
+            <Badge variant="outline" className="text-[10px] ml-1">
+              {totalFunds}
+            </Badge>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Badge 
-              variant="outline" 
-              className="bg-[var(--gain)]/10 text-[var(--gain)] border-[var(--gain)]/20 font-mono text-[10px]"
-            >
-              {gainCount} 涨
-            </Badge>
-            <Badge 
-              variant="outline" 
-              className="bg-[var(--loss)]/10 text-[var(--loss)] border-[var(--loss)]/20 font-mono text-[10px]"
-            >
-              {lossCount} 跌
-            </Badge>
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-[var(--gain)]">{gainCount}涨</span>
+            <span className="text-[var(--muted-foreground)]">/</span>
+            <span className="text-[var(--loss)]">{lossCount}跌</span>
           </div>
         </div>
       </div>
 
-      {/* Search */}
-      <div className="p-4 border-b border-[var(--border)]/50">
+      <div className="p-3 border-b border-[var(--border)]">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--muted-foreground)]" />
           <Input
-            className="pl-10 h-10 text-sm bg-[var(--muted)]/50 border-[var(--border)] focus:bg-[var(--card)] focus:border-[var(--primary)]/50 transition-all rounded-xl"
+            className="pl-9 h-9 text-sm"
             placeholder="搜索基金..."
             value={listQuery}
             onChange={(e) => onListQueryChange(e.target.value)}
@@ -180,9 +160,8 @@ export const FundListSidebar = ({
         </div>
       </div>
 
-      {/* Fund List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-        {funds.map((fund, idx) => (
+      <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+        {funds.map((fund) => (
           <FundItem
             key={fund.code}
             fund={fund}
@@ -191,22 +170,19 @@ export const FundListSidebar = ({
           />
         ))}
         {!funds.length && (
-          <div className="flex flex-col items-center justify-center py-16 text-[var(--muted-foreground)]">
-            <Wallet className="w-10 h-10 mb-3 opacity-30" />
-            <div className="text-sm font-medium">暂无基金</div>
-            <div className="text-xs mt-1 opacity-60">点击上方搜索添加</div>
+          <div className="flex flex-col items-center justify-center py-12 text-[var(--muted-foreground)]">
+            <div className="text-sm">暂无基金</div>
+            <div className="text-xs mt-1">搜索添加</div>
           </div>
         )}
       </div>
 
-      {/* Footer */}
-      <div className="p-4 border-t border-[var(--border)] bg-[var(--muted)]/20">
+      <div className="p-3 border-t border-[var(--border)]">
         <Button
           variant="outline"
-          className="w-full h-10 bg-[var(--card)] border-[var(--border)] hover:bg-[var(--muted)] hover:border-[var(--primary)]/30 transition-all rounded-xl font-medium"
+          className="w-full h-9 text-sm"
           onClick={onOpenHoldingSheet}
         >
-          <Wallet className="h-4 w-4 mr-2" />
           更新持仓
         </Button>
       </div>

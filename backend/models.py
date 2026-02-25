@@ -16,6 +16,7 @@ class FundInfo(BaseModel):
     cost: float = 0.0
     invested_amount: float = 0.0  # 金额模式下的投入本金
     estimate_pct: Optional[float] = None
+    nav: Optional[float] = None  # 当前净值（用于计算份额模式的持有金额）
     last_source: Optional[str] = None
     last_source_date: Optional[str] = None
     last_source_pct: Optional[float] = None

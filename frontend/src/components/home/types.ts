@@ -7,6 +7,7 @@ export type FundInfo = {
   shares: number;
   cost: number;
   estimate_pct?: number | null;
+  nav?: number | null;
 };
 
 export type TransactionInfo = {
