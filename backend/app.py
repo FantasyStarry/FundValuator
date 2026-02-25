@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
 from .data_sources import (
-    analyze_news_with_deepseek,
+    analyze_news_with_mimo,
     fetch_fund_gz,
     fetch_holdings,
     fetch_nav_history,
@@ -319,7 +319,7 @@ async def _trigger_news_analysis(items: List[dict]):
                 if len(content) > 5000:
                     content = content[:5000] + "..."
                     
-                result = await analyze_news_with_deepseek(item["title"], content, item.get("source"))
+                result = await analyze_news_with_mimo(item["title"], content, item.get("source"))
                 normalized = _normalize_news_analysis(result)
                 now_iso = datetime.now().isoformat(timespec="seconds")
                 upsert_news_analysis(news_id, normalized, now_iso)
@@ -1152,7 +1152,7 @@ async def api_news_feed(background_tasks: BackgroundTasks, source: str = "rss", 
 @app.post("/api/ai/news/analyze", response_model=NewsAnalysisResponse)
 async def api_ai_news_analyze(payload: NewsAnalysisRequest) -> NewsAnalysisResponse:
     try:
-        result = await analyze_news_with_deepseek(payload.title, payload.content, payload.source)
+        result = await analyze_news_with_mimo(payload.title, payload.content, payload.source)
     except ValueError:
         raise HTTPException(status_code=400, detail="DeepSeek API key 未配置")
     except Exception:

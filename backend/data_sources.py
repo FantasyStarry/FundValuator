@@ -412,7 +412,7 @@ async def fetch_article_content(url: str, timeout: float = 10.0) -> Optional[str
         return None
 
 
-async def analyze_news_with_deepseek(title: str, content: str, source: Optional[str] = None) -> dict:
+async def analyze_news_with_mimo(title: str, content: str, source: Optional[str] = None) -> dict:
     api_key = get_mimo_api_key()
     if not api_key:
         raise ValueError("MIMO_API_KEY is required")
