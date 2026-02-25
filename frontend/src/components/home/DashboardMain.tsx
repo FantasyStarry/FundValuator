@@ -177,6 +177,12 @@ export const DashboardMain = ({
                 <span className="text-xs text-[var(--muted-foreground)]">
                   {resolveSourceLabel(detail?.estimate_source, detail?.holiday_mode)}
                 </span>
+                {detail?.fund_gz_time && (
+                  <>
+                    <span className="text-xs text-[var(--muted-foreground)]">•</span>
+                    <span className="text-xs text-[var(--muted-foreground)]">{detail.fund_gz_time}</span>
+                  </>
+                )}
               </div>
             )}
           </div>

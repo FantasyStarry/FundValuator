@@ -82,6 +82,8 @@ async def fetch_fund_gz(code: str) -> Optional[dict]:
             "fundcode": data.get("fundcode"),
             "gsz": data.get("gsz"),
             "gszzl": data.get("gszzl"),
+            "gztime": data.get("gztime"),
+            "dwjz": data.get("dwjz"),
         }
     except json.JSONDecodeError:
         return None
