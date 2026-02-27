@@ -80,6 +80,7 @@ async def fetch_fund_gz(code: str) -> Optional[dict]:
         data = json.loads(match.group(0))
         return {
             "fundcode": data.get("fundcode"),
+            "name": data.get("name"),
             "gsz": data.get("gsz"),
             "gszzl": data.get("gszzl"),
             "gztime": data.get("gztime"),

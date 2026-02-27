@@ -58,6 +58,20 @@ def init_db() -> None:
                 )
                 """
             )
+            # 定义允许的列名和类型（白名单），防止 SQL 注入
+            _ALLOWED_COLUMNS = {
+                "amount": ("REAL", "0"),
+                "mode": ("TEXT", "'amount'"),
+                "shares": ("REAL", "0"),
+                "cost": ("REAL", "0"),
+                "invested_amount": ("REAL", "0"),
+                "last_source": ("TEXT", "NULL"),
+                "last_source_date": ("TEXT", "NULL"),
+                "last_source_pct": ("REAL", "NULL"),
+                "last_switch_at": ("TEXT", "NULL"),
+                "last_official_date": ("TEXT", "NULL"),
+            }
+            
             for col, col_type, default in [
                 ("amount", "REAL", "0"),
                 ("mode", "TEXT", "'amount'"),
@@ -70,6 +84,13 @@ def init_db() -> None:
                 ("last_switch_at", "TEXT", "NULL"),
                 ("last_official_date", "TEXT", "NULL"),
             ]:
+                # 验证列名在白名单中，防止 SQL 注入
+                if col not in _ALLOWED_COLUMNS:
+                    raise ValueError(f"Invalid column name: {col}")
+                expected_type, expected_default = _ALLOWED_COLUMNS[col]
+                if col_type != expected_type or default != expected_default:
+                    raise ValueError(f"Invalid column definition for {col}")
+                
                 cur.execute(
                     f"ALTER TABLE funds ADD COLUMN IF NOT EXISTS {col} {col_type} DEFAULT {default}"
                 )

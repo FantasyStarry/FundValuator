@@ -80,7 +80,6 @@ def get_news_keywords() -> List[str]:
         return [word for word in re.split(r"[,\s]+", raw) if word]
     return [
         "A股",
-        "A股",
         "沪深",
         "上证",
         "深证",

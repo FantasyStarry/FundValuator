@@ -2,9 +2,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import asyncio
 import json
+import os
 from datetime import datetime, date
+from decimal import Decimal, ROUND_HALF_UP
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -69,14 +71,34 @@ BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
 DIST_DIR = FRONTEND_DIR / "dist"
 
+# 金额计算精度设置
+DECIMAL_PRECISION = Decimal("0.01")
+
+
+def to_decimal(value: Optional[float]) -> Decimal:
+    """将 float 或 None 转换为 Decimal，None 返回 0"""
+    if value is None:
+        return Decimal("0")
+    return Decimal(str(value))
+
+
+def round_money(value: Decimal) -> Decimal:
+    """四舍五入到分（2位小数）"""
+    return value.quantize(DECIMAL_PRECISION, rounding=ROUND_HALF_UP)
+
+
 app = FastAPI(title="AI Fund MVP")
+
+# CORS 配置 - 生产环境应该限制具体来源
+# 从环境变量读取允许的域名，默认为本地开发环境
+_allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173").split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
 NEWS_CACHE_TTL_SEC = get_news_cache_ttl_sec()
@@ -85,9 +107,22 @@ redis_client: Optional[Redis] = None
 
 # WebSocket push task registry
 _estimate_push_tasks: Dict[str, asyncio.Task] = {}
+_estimate_push_tasks_lock = asyncio.Lock()
 _portfolio_push_task: Optional[asyncio.Task] = None
+_portfolio_push_task_lock = asyncio.Lock()
 _news_push_task: Optional[asyncio.Task] = None
+_news_push_task_lock = asyncio.Lock()
 _last_news_check: float = 0
+
+# 业务常量
+MAX_CONTENT_LENGTH = 5000  # 新闻内容最大长度
+TRANSITION_DURATION_SECONDS = 600  # 数据源切换过渡时间（秒）
+NEWS_ANALYSIS_LOCK_TTL = 300  # 新闻分析锁的过期时间（秒）
+NEWS_IMPORTANCE_THRESHOLD = 4.0  # 新闻重要性评分阈值
+NEWS_ANALYSIS_CONCURRENCY = 3  # 新闻分析并发数
+WEBSOCKET_PUSH_INTERVAL = 5  # WebSocket 推送间隔（秒）
+NEWS_PUSH_INTERVAL = 30  # 新闻推送间隔（秒）
+NEWS_FETCH_MULTIPLIER = 3  # 新闻获取数量倍数（用于过滤）
 
 
 class ConnectionManager:
@@ -119,7 +154,13 @@ class ConnectionManager:
         for conn in connections:
             try:
                 await conn.send_json(message)
-            except Exception:
+            except (WebSocketDisconnect, ConnectionResetError, BrokenPipeError) as e:
+                # 连接已断开，标记为死亡连接
+                dead_connections.append(conn)
+            except Exception as e:
+                # 其他异常记录日志后标记为死亡连接
+                import logging
+                logging.getLogger(__name__).warning(f"WebSocket send error: {e}")
                 dead_connections.append(conn)
         for conn in dead_connections:
             await self.disconnect(channel, conn)
@@ -298,10 +339,10 @@ async def _trigger_news_analysis(items: List[dict]):
     if redis_client:
         for news_id in missing_ids:
             lock_key = _analysis_lock_key(news_id)
-            await redis_client.set(lock_key, "1", ex=300)
+            await redis_client.set(lock_key, "1", ex=NEWS_ANALYSIS_LOCK_TTL)
 
     # Process missing items
-    semaphore = asyncio.Semaphore(3)
+    semaphore = asyncio.Semaphore(NEWS_ANALYSIS_CONCURRENCY)
     async def run_one(news_id: str):
         item = items_map[news_id]
         content = item.get("summary") or item.get("title") or ""
@@ -316,8 +357,8 @@ async def _trigger_news_analysis(items: List[dict]):
                          content = full_content
                 
                 # Truncate content if too long to avoid exceeding token limits
-                if len(content) > 5000:
-                    content = content[:5000] + "..."
+                if len(content) > MAX_CONTENT_LENGTH:
+                    content = content[:MAX_CONTENT_LENGTH] + "..."
                     
                 result = await analyze_news_with_mimo(item["title"], content, item.get("source"))
                 normalized = _normalize_news_analysis(result)
@@ -326,7 +367,9 @@ async def _trigger_news_analysis(items: List[dict]):
                 if redis_client:
                     await _redis_set_obj(_analysis_cache_key(news_id), normalized, NEWS_CACHE_TTL_SEC)
                     await redis_client.delete(_analysis_lock_key(news_id))
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to analyze news {news_id}: {e}", exc_info=True)
                 if redis_client:
                     await redis_client.delete(_analysis_lock_key(news_id))
                 
@@ -463,7 +506,7 @@ def _resolve_used_pct(
             start_at = _parse_datetime(switch_at)
             if start_at:
                 elapsed = (datetime.now() - start_at).total_seconds()
-                progress = min(max(elapsed / 600, 0.0), 1.0)
+                progress = min(max(elapsed / TRANSITION_DURATION_SECONDS, 0.0), 1.0)
                 transition_progress = progress
                 used_pct = last_source_pct + (target_pct - last_source_pct) * progress
                 used_source = "transition" if progress < 1 else "official"
@@ -471,7 +514,7 @@ def _resolve_used_pct(
             start_at = _parse_datetime(last_switch_at)
             if start_at:
                 elapsed = (datetime.now() - start_at).total_seconds()
-                progress = min(max(elapsed / 600, 0.0), 1.0)
+                progress = min(max(elapsed / TRANSITION_DURATION_SECONDS, 0.0), 1.0)
                 transition_progress = progress
                 used_pct = last_source_pct + (target_pct - last_source_pct) * progress
                 used_source = "transition" if progress < 1 else "official"
@@ -516,7 +559,9 @@ async def startup_event() -> None:
         client = Redis.from_url(redis_url, decode_responses=True)
         try:
             await client.ping()
-        except Exception:
+        except (ConnectionError, TimeoutError) as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Redis connection failed: {e}")
             await client.close()
         else:
             redis_client = client
@@ -530,8 +575,9 @@ async def startup_event() -> None:
             keys = await redis_client.keys("news:analysis:*")
             if keys:
                 await redis_client.delete(*keys)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to clear news analysis cache: {e}")
 
     # Start portfolio push loop
     asyncio.create_task(_portfolio_push_loop())
@@ -772,9 +818,13 @@ async def api_portfolio_overview() -> PortfolioOverview:
 
 
 @app.get("/api/market/search", response_model=List[dict])
-async def api_search_market(keyword: str) -> List[dict]:
-    if not keyword:
-        return []
+async def api_search_market(
+    keyword: str = Query(..., min_length=1, max_length=50, description="搜索关键词")
+) -> List[dict]:
+    # 验证关键词只包含合法字符（字母、数字、中文、空格）
+    import re
+    if not re.match(r'^[\w\s\u4e00-\u9fff]+$', keyword):
+        raise HTTPException(status_code=400, detail="关键词包含非法字符")
     return await search_market_funds(keyword)
 
 
@@ -1132,14 +1182,13 @@ async def api_news_feed(background_tasks: BackgroundTasks, source: str = "rss", 
         
         # Filter logic:
         # If analysis exists, check importance score
-        # Threshold: 4.0 (General market news and above)
+        # Threshold: NEWS_IMPORTANCE_THRESHOLD (General market news and above)
         # If analysis doesn't exist yet (background), we keep it to avoid empty feed initially
         if analysis:
             score = analysis.get("importance_score", 0)
             # If we have a valid score (not 0, assuming AI returns >0 for valid), apply filter
             # But AI might return 0 for noise.
-            # Let's say threshold is 4.0.
-            if score < 4.0:
+            if score < NEWS_IMPORTANCE_THRESHOLD:
                 filtered_count += 1
                 continue
         
@@ -1272,13 +1321,33 @@ async def _news_push_loop() -> None:
             await asyncio.sleep(10)
 
 
+def _verify_websocket_token(websocket: WebSocket) -> bool:
+    """验证 WebSocket 连接的 token。
+    
+    从查询参数中获取 token，如果未配置 WS_SECRET_TOKEN 则允许所有连接。
+    """
+    secret_token = os.getenv("WS_SECRET_TOKEN")
+    if not secret_token:
+        # 未配置密钥时允许连接（仅用于开发环境）
+        return True
+    
+    token = websocket.query_params.get("token")
+    return token == secret_token
+
+
 @app.websocket("/ws/estimate/{code}")
 async def ws_estimate(websocket: WebSocket, code: str) -> None:
+    # 验证身份
+    if not _verify_websocket_token(websocket):
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+    
     global _estimate_push_tasks
     await ws_manager.connect(f"estimate:{code}", websocket)
-    # Start push task if not already running
-    if code not in _estimate_push_tasks or _estimate_push_tasks[code].done():
-        _estimate_push_tasks[code] = asyncio.create_task(_estimate_push_loop(code))
+    # Start push task if not already running (使用锁保护)
+    async with _estimate_push_tasks_lock:
+        if code not in _estimate_push_tasks or _estimate_push_tasks[code].done():
+            _estimate_push_tasks[code] = asyncio.create_task(_estimate_push_loop(code))
     try:
         while True:
             data = await websocket.receive_text()
@@ -1288,24 +1357,32 @@ async def ws_estimate(websocket: WebSocket, code: str) -> None:
         pass
     finally:
         await ws_manager.disconnect(f"estimate:{code}", websocket)
-        # Cancel task if no more connections
+        # Cancel task if no more connections (使用锁保护)
         count = await ws_manager.get_channel_count(f"estimate:{code}")
-        if count == 0 and code in _estimate_push_tasks:
-            _estimate_push_tasks[code].cancel()
-            try:
-                await _estimate_push_tasks[code]
-            except asyncio.CancelledError:
-                pass
-            del _estimate_push_tasks[code]
+        if count == 0:
+            async with _estimate_push_tasks_lock:
+                if code in _estimate_push_tasks:
+                    _estimate_push_tasks[code].cancel()
+                    try:
+                        await _estimate_push_tasks[code]
+                    except asyncio.CancelledError:
+                        pass
+                    del _estimate_push_tasks[code]
 
 
 @app.websocket("/ws/portfolio")
 async def ws_portfolio(websocket: WebSocket) -> None:
+    # 验证身份
+    if not _verify_websocket_token(websocket):
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+    
     global _portfolio_push_task
     await ws_manager.connect("portfolio", websocket)
-    # Start push task if not already running
-    if _portfolio_push_task is None or _portfolio_push_task.done():
-        _portfolio_push_task = asyncio.create_task(_portfolio_push_loop())
+    # Start push task if not already running (使用锁保护)
+    async with _portfolio_push_task_lock:
+        if _portfolio_push_task is None or _portfolio_push_task.done():
+            _portfolio_push_task = asyncio.create_task(_portfolio_push_loop())
     try:
         while True:
             data = await websocket.receive_text()
@@ -1315,24 +1392,32 @@ async def ws_portfolio(websocket: WebSocket) -> None:
         pass
     finally:
         await ws_manager.disconnect("portfolio", websocket)
-        # Cancel task if no more connections
+        # Cancel task if no more connections (使用锁保护)
         count = await ws_manager.get_channel_count("portfolio")
-        if count == 0 and _portfolio_push_task is not None:
-            _portfolio_push_task.cancel()
-            try:
-                await _portfolio_push_task
-            except asyncio.CancelledError:
-                pass
-            _portfolio_push_task = None
+        if count == 0:
+            async with _portfolio_push_task_lock:
+                if _portfolio_push_task is not None:
+                    _portfolio_push_task.cancel()
+                    try:
+                        await _portfolio_push_task
+                    except asyncio.CancelledError:
+                        pass
+                    _portfolio_push_task = None
 
 
 @app.websocket("/ws/news")
 async def ws_news(websocket: WebSocket) -> None:
+    # 验证身份
+    if not _verify_websocket_token(websocket):
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+    
     global _news_push_task
     await ws_manager.connect("news", websocket)
-    # Start push task if not already running
-    if _news_push_task is None or _news_push_task.done():
-        _news_push_task = asyncio.create_task(_news_push_loop())
+    # Start push task if not already running (使用锁保护)
+    async with _news_push_task_lock:
+        if _news_push_task is None or _news_push_task.done():
+            _news_push_task = asyncio.create_task(_news_push_loop())
     try:
         while True:
             data = await websocket.receive_text()
@@ -1342,15 +1427,17 @@ async def ws_news(websocket: WebSocket) -> None:
         pass
     finally:
         await ws_manager.disconnect("news", websocket)
-        # Cancel task if no more connections
+        # Cancel task if no more connections (使用锁保护)
         count = await ws_manager.get_channel_count("news")
-        if count == 0 and _news_push_task is not None:
-            _news_push_task.cancel()
-            try:
-                await _news_push_task
-            except asyncio.CancelledError:
-                pass
-            _news_push_task = None
+        if count == 0:
+            async with _news_push_task_lock:
+                if _news_push_task is not None:
+                    _news_push_task.cancel()
+                    try:
+                        await _news_push_task
+                    except asyncio.CancelledError:
+                        pass
+                    _news_push_task = None
 
 
 if DIST_DIR.exists():
