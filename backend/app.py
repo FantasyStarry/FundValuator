@@ -19,6 +19,7 @@ from .data_sources import (
     fetch_nav_history,
     fetch_news_feed,
     fetch_quote,
+    fetch_quotes_batch,
     search_market_funds,
     fetch_intraday_nav,
     fetch_article_content,
@@ -49,6 +50,7 @@ from .storage import (
     get_fund,
     get_holdings,
     init_db,
+    init_pool,
     list_news_analysis,
     list_news_items,
     list_funds,
@@ -123,6 +125,16 @@ NEWS_ANALYSIS_CONCURRENCY = 3  # 新闻分析并发数
 WEBSOCKET_PUSH_INTERVAL = 5  # WebSocket 推送间隔（秒）
 NEWS_PUSH_INTERVAL = 30  # 新闻推送间隔（秒）
 NEWS_FETCH_MULTIPLIER = 3  # 新闻获取数量倍数（用于过滤）
+FUND_GZ_CACHE_TTL_SEC = 60  # 基金估值缓存TTL（秒）
+FUND_NAV_CACHE_TTL_SEC = 300  # 基金NAV历史缓存TTL（秒）
+
+# 外部API并发控制
+FUND_GZ_SEMAPHORE_LIMIT = 10  # 基金估值API并发限制
+QUOTE_SEMAPHORE_LIMIT = 8  # 股票行情API并发限制
+
+# 全局信号量变量
+_fund_gz_semaphore: Optional[asyncio.Semaphore] = None
+_quote_semaphore: Optional[asyncio.Semaphore] = None
 
 
 class ConnectionManager:
@@ -248,6 +260,14 @@ def _analysis_lock_key(news_id: str) -> str:
     return f"news:analysis:lock:{news_id}"
 
 
+def _fund_gz_cache_key(code: str) -> str:
+    return f"fund:gz:{code}"
+
+
+def _fund_nav_cache_key(code: str, limit: int) -> str:
+    return f"fund:nav:{code}:{limit}"
+
+
 async def _redis_get_json(key: str) -> Optional[List[dict]]:
     if not redis_client:
         return None
@@ -290,6 +310,44 @@ async def _redis_set_obj(key: str, value: dict, ttl_sec: int) -> None:
         return
     payload = json.dumps(value, ensure_ascii=False)
     await redis_client.set(key, payload, ex=ttl_sec)
+
+
+async def _fetch_fund_gz_cached(code: str) -> Optional[dict]:
+    cache_key = _fund_gz_cache_key(code)
+    if redis_client:
+        cached = await _redis_get_obj(cache_key)
+        if cached:
+            return cached
+    result = await fetch_fund_gz(code)
+    if result and redis_client:
+        await _redis_set_obj(cache_key, result, FUND_GZ_CACHE_TTL_SEC)
+    return result
+
+
+async def _get_fund_gz_with_cache(code: str) -> Optional[dict]:
+    if _fund_gz_semaphore:
+        async with _fund_gz_semaphore:
+            return await _fetch_fund_gz_cached(code)
+    return await _fetch_fund_gz_cached(code)
+
+
+async def _fetch_quotes_with_semaphore(codes: List[str]) -> Dict[str, dict]:
+    if _quote_semaphore:
+        async with _quote_semaphore:
+            return await fetch_quotes_batch(codes)
+    return await fetch_quotes_batch(codes)
+
+
+async def _get_nav_history_with_cache(code: str, limit: int) -> List[dict]:
+    cache_key = _fund_nav_cache_key(code, limit)
+    if redis_client:
+        cached = await _redis_get_json(cache_key)
+        if cached:
+            return cached
+    result = await fetch_nav_history(code, limit=limit)
+    if result and redis_client:
+        await _redis_set_json(cache_key, result, FUND_NAV_CACHE_TTL_SEC)
+    return result
 
 
 async def _trigger_news_analysis(items: List[dict]):
@@ -553,6 +611,7 @@ def _resolve_used_pct(
 @app.on_event("startup")
 async def startup_event() -> None:
     init_db()
+    init_pool()
     global redis_client
     redis_url = get_redis_url()
     if redis_url:
@@ -565,6 +624,10 @@ async def startup_event() -> None:
             await client.close()
         else:
             redis_client = client
+
+    global _fund_gz_semaphore, _quote_semaphore
+    _fund_gz_semaphore = asyncio.Semaphore(FUND_GZ_SEMAPHORE_LIMIT)
+    _quote_semaphore = asyncio.Semaphore(QUOTE_SEMAPHORE_LIMIT)
 
     # Clear old analysis to force re-analysis with full content
     # In production this might be too aggressive, but for this update it's necessary
@@ -585,8 +648,7 @@ async def startup_event() -> None:
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
-    # Cancel all WebSocket push tasks
-    global _estimate_push_tasks, _portfolio_push_task, _news_push_task
+    global _estimate_push_tasks, _portfolio_push_task, _news_push_task, _fund_gz_semaphore, _quote_semaphore
     
     for code, task in list(_estimate_push_tasks.items()):
         task.cancel()
@@ -615,6 +677,9 @@ async def shutdown_event() -> None:
     if redis_client:
         await redis_client.close()
 
+    _fund_gz_semaphore = None
+    _quote_semaphore = None
+
 
 @app.get("/")
 async def root() -> FileResponse:
@@ -634,7 +699,7 @@ async def api_list_funds(keyword: str = "") -> List[FundInfo]:
     # To avoid too many requests if list is huge, we might need caution.
     # But usually user has < 50 funds.
     
-    tasks = [fetch_fund_gz(f.code) for f in funds]
+    tasks = [_get_fund_gz_with_cache(f.code) for f in funds]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
     for i, res in enumerate(results):
@@ -668,8 +733,8 @@ async def api_portfolio_overview() -> PortfolioOverview:
         )
 
     # 2. Fetch realtime estimate and latest official NAV concurrently
-    tasks_gz = [fetch_fund_gz(f["code"]) for f in holding_funds]
-    tasks_nav = [fetch_nav_history(f["code"], limit=1) for f in holding_funds]
+    tasks_gz = [_get_fund_gz_with_cache(f["code"]) for f in holding_funds]
+    tasks_nav = [_get_nav_history_with_cache(f["code"], limit=1) for f in holding_funds]
     estimates = await asyncio.gather(*tasks_gz, return_exceptions=True)
     navs = await asyncio.gather(*tasks_nav, return_exceptions=True)
     
@@ -832,7 +897,7 @@ async def api_search_market(
 async def api_add_fund(payload: FundCreate) -> FundInfo:
     code = payload.code.strip()
     try:
-        fund_gz = await fetch_fund_gz(code)
+        fund_gz = await _get_fund_gz_with_cache(code)
         if not fund_gz:
             raise HTTPException(status_code=400, detail="无法获取基金估值信息")
         name = fund_gz.get("name", code)
@@ -1030,8 +1095,8 @@ async def api_fund_estimate(code: str) -> EstimateResponse:
     if not fund:
         raise HTTPException(status_code=404, detail="基金不存在")
     try:
-        fund_gz = await fetch_fund_gz(code)
-        nav_history = await fetch_nav_history(code, limit=2)
+        fund_gz = await _get_fund_gz_with_cache(code)
+        nav_history = await _get_nav_history_with_cache(code, limit=2)
         latest_nav = nav_history[0] if nav_history else None
         prev_nav = nav_history[1] if len(nav_history) > 1 else None
         
@@ -1040,8 +1105,13 @@ async def api_fund_estimate(code: str) -> EstimateResponse:
         estimate_pct = 0.0
         estimate_source = "holdings"
         total_weight = 0.0
+        
+        stock_codes = [h["stock_code"] for h in holdings]
+        quotes_map = await _fetch_quotes_with_semaphore(stock_codes)
+        
         for holding in holdings:
-            quote = await fetch_quote(holding["stock_code"])
+            stock_code = holding["stock_code"]
+            quote = quotes_map.get(stock_code)
             if not quote:
                 continue
             weight = holding["weight"]
@@ -1160,7 +1230,7 @@ async def api_nav_history(code: str, limit: int = 30) -> NavHistoryResponse:
              # If empty, frontend will handle "coming soon"
              return NavHistoryResponse(code=code, name=fund["name"], items=items)
         
-        items = await fetch_nav_history(code, limit=limit)
+        items = await _get_nav_history_with_cache(code, limit=limit)
         return NavHistoryResponse(code=code, name=fund["name"], items=items)
     except Exception:
         raise HTTPException(status_code=502, detail="净值数据获取失败，请稍后重试")
@@ -1245,7 +1315,7 @@ async def _estimate_push_loop(code: str) -> None:
             if not fund:
                 await asyncio.sleep(5)
                 continue
-            fund_gz = await fetch_fund_gz(code)
+            fund_gz = await _get_fund_gz_with_cache(code)
             if fund_gz:
                 await ws_manager.broadcast(f"estimate:{code}", {
                     "type": "estimate_update",

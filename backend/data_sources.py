@@ -4,7 +4,7 @@ import asyncio
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import parsedate_to_datetime
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from bs4 import BeautifulSoup
@@ -250,6 +250,104 @@ async def fetch_quote(code: str) -> Optional[dict]:
     if data:
         return data
     return await fetch_quote_sina(code)
+
+
+async def _parse_tencent_batch_response(text: str, code_map: Dict[str, str]) -> Dict[str, dict]:
+    results: Dict[str, dict] = {}
+    stock_pattern = r'([^="]+)="([^"]+)"'
+    matches = re.findall(stock_pattern, text)
+    for stock_code, data_str in matches:
+        if stock_code not in code_map:
+            continue
+        original_code = code_map[stock_code]
+        parts = data_str.split("~")
+        if len(parts) < 5:
+            continue
+        name = parts[1]
+        price = float(parts[3]) if parts[3] else 0.0
+        prev_close = float(parts[4]) if parts[4] else 0.0
+        if prev_close == 0 or price == 0:
+            continue
+        change_pct = (price - prev_close) / prev_close * 100
+        results[original_code] = {
+            "stock_code": original_code,
+            "stock_name": name,
+            "price": price,
+            "prev_close": prev_close,
+            "change_pct": change_pct,
+        }
+    return results
+
+
+async def _parse_sina_batch_response(text: str, code_map: Dict[str, str]) -> Dict[str, dict]:
+    results: Dict[str, dict] = {}
+    lines = text.strip().split("\n")
+    for line in lines:
+        if "=" not in line:
+            continue
+        stock_code = line.split("=")[0].split("list=")[-1]
+        if stock_code not in code_map:
+            continue
+        original_code = code_map[stock_code]
+        payload = line.split("=", 1)[1].strip().strip('";')
+        parts = payload.split(",")
+        if len(parts) < 4:
+            continue
+        name = parts[0]
+        prev_close = float(parts[2]) if parts[2] else 0.0
+        price = float(parts[3]) if parts[3] else 0.0
+        if prev_close == 0 or price == 0:
+            continue
+        change_pct = (price - prev_close) / prev_close * 100
+        results[original_code] = {
+            "stock_code": original_code,
+            "stock_name": name,
+            "price": price,
+            "prev_close": prev_close,
+            "change_pct": change_pct,
+        }
+    return results
+
+
+async def fetch_quotes_batch(codes: List[str]) -> Dict[str, dict]:
+    if not codes:
+        return {}
+    
+    if len(codes) == 1:
+        result = await fetch_quote(codes[0])
+        if result:
+            return {codes[0]: result}
+        return {}
+    
+    market_codes = [_normalize_stock_code(code) for code in codes]
+    code_map = {mc: code for mc, code in zip(market_codes, codes)}
+    codes_str = ",".join(market_codes)
+    
+    try:
+        url = f"http://qt.gtimg.cn/q={codes_str}"
+        text = await fetch_text(url, timeout=10.0)
+        results = await _parse_tencent_batch_response(text, code_map)
+        if results:
+            return results
+    except Exception:
+        pass
+    
+    try:
+        url = f"http://hq.sinajs.cn/list={codes_str}"
+        text = await fetch_text(url, timeout=10.0)
+        results = await _parse_sina_batch_response(text, code_map)
+        if results:
+            return results
+    except Exception:
+        pass
+    
+    results: Dict[str, dict] = {}
+    tasks = [fetch_quote(code) for code in codes]
+    quotes = await asyncio.gather(*tasks, return_exceptions=True)
+    for code, quote in zip(codes, quotes):
+        if isinstance(quote, dict):
+            results[code] = quote
+    return results
 
 
 async def search_market_funds(keyword: str) -> List[dict]:

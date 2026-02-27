@@ -1,15 +1,66 @@
 from typing import Dict, List, Optional
 import json
+from contextlib import contextmanager
 
 from psycopg import connect
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool as SyncConnectionPool
+from psycopg_pool import AsyncConnectionPool
 
 from .config import get_database_url
 
+_pool: Optional[SyncConnectionPool] = None
+_async_pool: Optional[AsyncConnectionPool] = None
 
+
+def init_pool(min_size: int = 1, max_size: int = 10) -> None:
+    global _pool
+    url = get_database_url() or "postgresql://postgres:postgres@localhost:5432/jijin"
+    _pool = SyncConnectionPool(url, min_size=min_size, max_size=max_size)
+
+
+def init_async_pool(min_size: int = 1, max_size: int = 10) -> None:
+    global _async_pool
+    url = get_database_url() or "postgresql://postgres:postgres@localhost:5432/jijin"
+    _async_pool = AsyncConnectionPool(url, min_size=min_size, max_size=max_size)
+
+
+def close_pool() -> None:
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
+
+
+async def close_async_pool() -> None:
+    global _async_pool
+    if _async_pool is not None:
+        await _async_pool.close()
+        _async_pool = None
+
+
+@contextmanager
 def get_conn():
     url = get_database_url() or "postgresql://postgres:postgres@localhost:5432/jijin"
-    return connect(url, row_factory=dict_row)
+    if _pool is not None:
+        with _pool.connection() as conn:
+            conn.row_factory = dict_row
+            yield conn
+    else:
+        with connect(url, row_factory=dict_row) as conn:
+            yield conn
+
+
+@contextmanager
+async def get_async_conn():
+    url = get_database_url() or "postgresql://postgres:postgres@localhost:5432/jijin"
+    if _async_pool is not None:
+        async with _async_pool.connection() as conn:
+            conn.row_factory = dict_row
+            yield conn
+    else:
+        async with await connect(url, row_factory=dict_row) as conn:
+            yield conn
 
 
 def clear_news_analysis() -> None:
