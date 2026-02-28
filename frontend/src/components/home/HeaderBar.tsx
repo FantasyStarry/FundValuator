@@ -12,7 +12,7 @@ type HeaderBarProps = {
   marketQuery: string;
   onMarketQueryChange: (value: string) => void;
   marketResults: MarketFund[];
-  onAddFund: (code: string) => void;
+  onAddFundClick: (fund: MarketFund) => void;
   updateTime?: string | null;
   addingFund?: boolean;
 };
@@ -22,7 +22,7 @@ export const HeaderBar = ({
   marketQuery,
   onMarketQueryChange,
   marketResults,
-  onAddFund,
+  onAddFundClick,
   updateTime,
   addingFund,
 }: HeaderBarProps) => {
@@ -63,7 +63,7 @@ export const HeaderBar = ({
                   <div
                     key={item.code}
                     className="flex justify-between items-center p-2 rounded hover:bg-[var(--muted)] cursor-pointer"
-                    onClick={() => onAddFund(item.code)}
+                    onClick={() => onAddFundClick(item)}
                   >
                     <div>
                       <div className="text-sm font-medium">{item.name}</div>

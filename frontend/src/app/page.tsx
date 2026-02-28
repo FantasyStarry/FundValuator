@@ -10,6 +10,8 @@ import { HoldingSheet } from "@/components/home/HoldingSheet";
 import { NewsTimeline } from "@/components/home/NewsTimeline";
 import { StatusToast } from "@/components/home/StatusToast";
 import { TransactionSheet } from "@/components/home/TransactionSheet";
+import { AddFundSheet } from "@/components/home/AddFundSheet";
+import { QuickTradeSheet } from "@/components/home/QuickTradeSheet";
 import { useWebSocket } from "@/lib/useWebSocket";
 import type {
   EstimateResponse,
@@ -146,7 +148,12 @@ export default function Home() {
   const [analysisCache, setAnalysisCache] = useState<Record<string, NewsAnalysisResponse>>({});
   const [newsLoading, setNewsLoading] = useState(false);
   const [addingFund, setAddingFund] = useState(false);
-  const headerRef = useRef<HTMLElement>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+
+  const [showAddFundSheet, setShowAddFundSheet] = useState(false);
+  const [selectedMarketFund, setSelectedMarketFund] = useState<MarketFund | null>(null);
+  const [showQuickTradeSheet, setShowQuickTradeSheet] = useState(false);
+  const [quickTradeCode, setQuickTradeCode] = useState<string>("");
 
   const selectedFund = useMemo(() => funds.find((item) => item.code === selectedCode), [funds, selectedCode]);
 
@@ -519,32 +526,74 @@ export default function Home() {
     */
   }, [chartOption]);
 
-  const handleAddFund = async (code: string) => {
-    // 立即关闭搜索弹窗
+  const handleAddFund = async (
+    code: string,
+    holding: {
+      mode: "amount" | "shares";
+      amount: number;
+      shares: number;
+      cost: number;
+    } | null,
+    transaction?: {
+      type: "buy" | "sell";
+      amount: number;
+      shares: number;
+      price: number;
+      trans_date: string;
+      is_after_3pm: boolean;
+    } | null
+  ) => {
     setMarketQuery("");
     setMarketResults([]);
     setAddingFund(true);
-    
+
     try {
       const newFund = await addFund(code);
-      
-      // 乐观更新：先在本地添加基金
-      setFunds(prev => {
-        const exists = prev.some(f => f.code === code);
+
+      setFunds((prev) => {
+        const exists = prev.some((f) => f.code === code);
         if (exists) return prev;
         return [...prev, newFund];
       });
-      
-      // 自动选中新添加的基金
+
       setSelectedCode(code);
-      
-      pushStatus("基金已加入");
-      
-      // 后台刷新数据（不阻塞 UI）
-      Promise.all([
-        loadFunds(listQuery),
-        loadPortfolio()
-      ]).catch(() => {});
+
+      if (holding && holding.mode === "amount" && holding.amount > 0) {
+        await updateFundAmount(code, {
+          amount: holding.amount,
+          mode: "amount",
+          shares: 0,
+          cost: 0,
+        });
+      } else if (holding && holding.mode === "shares" && holding.shares > 0) {
+        await updateFundAmount(code, {
+          amount: 0,
+          mode: "shares",
+          shares: holding.shares,
+          cost: holding.cost,
+        });
+      }
+
+      if (transaction && transaction.amount > 0 && transaction.price > 0) {
+        const mode = holding?.mode ?? "amount";
+        await addTransaction({
+          fund_code: code,
+          type: transaction.type,
+          amount: mode === "amount" ? transaction.amount : transaction.shares * transaction.price,
+          shares: mode === "shares" ? transaction.shares : transaction.amount / transaction.price,
+          price: transaction.price,
+          trans_date: transaction.trans_date,
+          is_after_3pm: transaction.is_after_3pm,
+          mode: mode,
+        });
+      }
+
+      pushStatus(holding || transaction ? "基金已添加" : "基金已加入");
+
+      await Promise.all([loadFunds(listQuery), loadPortfolio()]);
+      if (code) {
+        await loadDetail(code);
+      }
     } catch (err) {
       pushStatus(err instanceof Error ? err.message : "添加失败");
     } finally {
@@ -652,7 +701,10 @@ export default function Home() {
         marketQuery={marketQuery}
         onMarketQueryChange={setMarketQuery}
         marketResults={marketResults}
-        onAddFund={handleAddFund}
+        onAddFundClick={(fund) => {
+          setSelectedMarketFund(fund);
+          setShowAddFundSheet(true);
+        }}
         updateTime={portfolio?.update_time}
         addingFund={addingFund}
       />
@@ -666,6 +718,10 @@ export default function Home() {
             onListQueryChange={setListQuery}
             onSelectCode={setSelectedCode}
             onOpenHoldingSheet={() => selectedFund && setShowHoldingSheet(true)}
+            onQuickTrade={(code) => {
+              setQuickTradeCode(code);
+              setShowQuickTradeSheet(true);
+            }}
           />
 
           <DashboardMain
@@ -730,6 +786,51 @@ export default function Home() {
         inputCost={inputCost}
         onInputCostChange={setInputCost}
         onSubmit={handleUpdateHolding}
+      />
+
+      <AddFundSheet
+        open={showAddFundSheet}
+        onClose={() => {
+          setShowAddFundSheet(false);
+          setSelectedMarketFund(null);
+        }}
+        selectedFund={selectedMarketFund ?? undefined}
+        currentNav={detail?.fund_gz_nav}
+        onAddFundWithHolding={handleAddFund}
+      />
+
+      <QuickTradeSheet
+        open={showQuickTradeSheet}
+        onClose={() => {
+          setShowQuickTradeSheet(false);
+          setQuickTradeCode("");
+        }}
+        selectedFund={funds.find(f => f.code === quickTradeCode)}
+        detail={quickTradeCode === selectedCode ? detail : null}
+        onQuickTrade={async (fundCode, transaction) => {
+          const fund = funds.find(f => f.code === fundCode);
+          if (!fund) return;
+          
+          try {
+            await addTransaction({
+              fund_code: fundCode,
+              type: transaction.type,
+              amount: transaction.amount,
+              shares: transaction.shares,
+              price: transaction.price,
+              trans_date: transaction.trans_date,
+              is_after_3pm: transaction.is_after_3pm,
+              mode: transaction.mode,
+            });
+            
+            await loadFunds(listQuery);
+            await loadPortfolio();
+            await loadDetail(fundCode);
+            pushStatus("交易已记录");
+          } catch (err) {
+            pushStatus(err instanceof Error ? err.message : "交易失败");
+          }
+        }}
       />
     </div>
   );

@@ -15,6 +15,7 @@ type FundListSidebarProps = {
   onListQueryChange: (value: string) => void;
   onSelectCode: (code: string) => void;
   onOpenHoldingSheet: () => void;
+  onQuickTrade: (code: string) => void;
 };
 
 const AnimatedPercent = ({ value }: { value: number | null }) => {
@@ -124,6 +125,7 @@ export const FundListSidebar = ({
   onListQueryChange,
   onSelectCode,
   onOpenHoldingSheet,
+  onQuickTrade,
 }: FundListSidebarProps) => {
   const totalFunds = funds.length;
   const gainCount = funds.filter(f => (f.estimate_pct ?? 0) >= 0).length;
@@ -178,13 +180,22 @@ export const FundListSidebar = ({
       </div>
 
       <div className="p-3 border-t border-[var(--border)]">
-        <Button
-          variant="outline"
-          className="w-full h-9 text-sm"
-          onClick={onOpenHoldingSheet}
-        >
-          更新持仓
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="flex-1 h-9 text-sm"
+            onClick={onOpenHoldingSheet}
+          >
+            更新持仓
+          </Button>
+          <Button
+            className="flex-1 h-9 text-sm"
+            onClick={() => selectedCode && onQuickTrade(selectedCode)}
+            disabled={!selectedCode}
+          >
+            快捷交易
+          </Button>
+        </div>
       </div>
     </aside>
   );
