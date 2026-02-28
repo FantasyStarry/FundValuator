@@ -69,6 +69,8 @@ from .storage import (
 )
 
 
+from .rate_limit import RateLimitMiddleware, set_redis_client
+
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
 DIST_DIR = FRONTEND_DIR / "dist"
@@ -102,6 +104,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
+
+app.add_middleware(RateLimitMiddleware)
 
 NEWS_CACHE_TTL_SEC = get_news_cache_ttl_sec()
 NEWS_REFRESH_INTERVAL_SEC = get_news_refresh_interval_sec()
@@ -624,6 +628,7 @@ async def startup_event() -> None:
             await client.close()
         else:
             redis_client = client
+            set_redis_client(client)
 
     global _fund_gz_semaphore, _quote_semaphore
     _fund_gz_semaphore = asyncio.Semaphore(FUND_GZ_SEMAPHORE_LIMIT)
