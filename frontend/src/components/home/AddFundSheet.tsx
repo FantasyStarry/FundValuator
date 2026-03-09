@@ -149,7 +149,6 @@ export const AddFundSheet = ({
   if (!open || !selectedFund) return null;
 
   const today = new Date().toISOString().split("T")[0];
-  const canSubmit = holdingMode !== "none" || recordTransaction;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4" onClick={onClose}>

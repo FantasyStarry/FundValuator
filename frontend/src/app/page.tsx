@@ -1,18 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as echarts from "echarts";
 import type { TooltipComponentFormatterCallbackParams } from "echarts";
+import { AddFundSheet } from "@/components/home/AddFundSheet";
 import { DashboardMain } from "@/components/home/DashboardMain";
 import { FundListSidebar } from "@/components/home/FundListSidebar";
 import { HeaderBar } from "@/components/home/HeaderBar";
 import { HoldingSheet } from "@/components/home/HoldingSheet";
 import { NewsTimeline } from "@/components/home/NewsTimeline";
+import { QuickTradeSheet } from "@/components/home/QuickTradeSheet";
 import { StatusToast } from "@/components/home/StatusToast";
 import { TransactionSheet } from "@/components/home/TransactionSheet";
-import { AddFundSheet } from "@/components/home/AddFundSheet";
-import { QuickTradeSheet } from "@/components/home/QuickTradeSheet";
-import { useWebSocket } from "@/lib/useWebSocket";
 import type {
   EstimateResponse,
   FundInfo,
@@ -25,6 +23,7 @@ import type {
   PortfolioOverview,
   TransactionInfo,
 } from "@/components/home/types";
+import { useWebSocket } from "@/lib/useWebSocket";
 
 interface WSEstimateUpdate {
   type: "estimate_update";
@@ -56,6 +55,9 @@ interface WSNewsUpdate {
 }
 
 const API_BASE = "/api";
+const NEWS_REFRESH_INTERVAL_MS = 15 * 1000;
+const NEWS_MAX_ITEMS = 200;
+const NEWS_CLEAN_INTERVAL_MS = 10 * 60 * 1000;
 
 const fetchJson = async <T,>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -66,10 +68,12 @@ const fetchJson = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     },
     cache: "no-store",
   });
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `Request failed: ${res.status}`);
   }
+
   return res.json() as Promise<T>;
 };
 
@@ -90,46 +94,42 @@ const deleteFund = (code: string): Promise<void> =>
     method: "DELETE",
   });
 
-const updateFundAmount = (code: string, payload: { amount: number; mode: "amount" | "shares"; shares: number; cost: number }) =>
+const updateFundAmount = (
+  code: string,
+  payload: { amount: number; mode: "amount" | "shares"; shares: number; cost: number }
+) =>
   fetchJson<FundInfo>(`/funds/${code}/amount`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 
-const addTransaction = (payload: { fund_code: string; type: "buy" | "sell"; amount: number; shares: number; price: number; trans_date: string; is_after_3pm: boolean; mode: string }) =>
+const addTransaction = (payload: {
+  fund_code: string;
+  type: "buy" | "sell";
+  amount: number;
+  shares: number;
+  price: number;
+  trans_date: string;
+  is_after_3pm: boolean;
+  mode: string;
+}) =>
   fetchJson<TransactionInfo>("/transactions", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 
-const fetchTransactions = (code: string) =>
-  fetchJson<TransactionInfo[]>(`/funds/${code}/transactions`);
-
-const deleteTransaction = (id: number) =>
-  fetchJson<void>(`/transactions/${id}`, {
-    method: "DELETE",
-  });
-
 const fetchPortfolioOverview = () => fetchJson<PortfolioOverview>("/portfolio/overview");
-
 const fetchEstimate = (code: string) => fetchJson<EstimateResponse>(`/funds/${code}/estimate`);
-
 const fetchNavHistory = (code: string, limit = 30) =>
   fetchJson<NavHistoryResponse>(`/funds/${code}/nav/history?limit=${limit}`);
-
 const searchMarketFunds = (keyword: string) =>
   fetchJson<MarketFund[]>(`/market/search?keyword=${encodeURIComponent(keyword)}`);
-
 const fetchNewsFeed = (source = "rss", limit = 200) =>
   fetchJson<NewsFeedResponse>(`/news/feed?source=${encodeURIComponent(source)}&limit=${limit}`);
 
-const NEWS_REFRESH_INTERVAL_MS = 15 * 1000;
-const NEWS_MAX_ITEMS = 200;
-const NEWS_CLEAN_INTERVAL_MS = 10 * 60 * 1000;
-
 export default function Home() {
   const [funds, setFunds] = useState<FundInfo[]>([]);
-  const [selectedCode, setSelectedCode] = useState<string>("");
+  const [selectedCode, setSelectedCode] = useState("");
   const [detail, setDetail] = useState<EstimateResponse | null>(null);
   const [navItems, setNavItems] = useState<NavItem[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioOverview | null>(null);
@@ -143,94 +143,15 @@ export default function Home() {
   const [inputCost, setInputCost] = useState("");
   const [showHoldingSheet, setShowHoldingSheet] = useState(false);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
-  const newsSource = "rss";
-  const [selectedNewsKey, setSelectedNewsKey] = useState<string>("");
-  const [analysisCache, setAnalysisCache] = useState<Record<string, NewsAnalysisResponse>>({});
-  const [newsLoading, setNewsLoading] = useState(false);
+  const [selectedNewsKey, setSelectedNewsKey] = useState("");
+  const [, setAnalysisCache] = useState<Record<string, NewsAnalysisResponse>>({});
+  const [, setNewsLoading] = useState(false);
   const [addingFund, setAddingFund] = useState(false);
   const headerRef = useRef<HTMLElement | null>(null);
-
   const [showAddFundSheet, setShowAddFundSheet] = useState(false);
   const [selectedMarketFund, setSelectedMarketFund] = useState<MarketFund | null>(null);
   const [showQuickTradeSheet, setShowQuickTradeSheet] = useState(false);
-  const [quickTradeCode, setQuickTradeCode] = useState<string>("");
-
-  const selectedFund = useMemo(() => funds.find((item) => item.code === selectedCode), [funds, selectedCode]);
-
-  const fundsWithComputed = useMemo(() => {
-    return funds.map(fund => ({
-      ...fund,
-      computedAmount: fund.mode === "amount" 
-        ? fund.amount 
-        : fund.shares * (fund.nav ?? 0)
-    }));
-  }, [funds]);
-
-  // WebSocket for real-time estimate updates
-  const { lastMessage: estimateMessage } = useWebSocket<WSEstimateUpdate>(
-    selectedCode ? `/ws/estimate/${selectedCode}` : "",
-    { onMessage: (data) => {
-      if (data.type === "estimate_update" && detail) {
-        setDetail(prev => prev ? {
-          ...prev,
-          estimate_pct: data.estimate_pct ?? prev.estimate_pct,
-          fund_gz_pct: data.estimate_pct ?? prev.fund_gz_pct,
-          fund_gz_nav: data.estimate_nav ?? prev.fund_gz_nav,
-          fund_gz_time: data.update_time ?? prev.fund_gz_time,
-        } : null);
-      }
-    }}
-  );
-
-  // WebSocket for real-time portfolio updates
-  const { lastMessage: portfolioMessage } = useWebSocket<WSPortfolioUpdate>(
-    "/ws/portfolio",
-    { onMessage: (data) => {
-      if (data.type === "portfolio_update") {
-        const validSources = ["realtime", "official", "transition", "holdings"] as const;
-        const source = validSources.includes(data.used_source as typeof validSources[number])
-          ? (data.used_source as typeof validSources[number])
-          : "holdings";
-        setPortfolio({
-          total_amount: data.total_amount,
-          total_daily_income: data.total_daily_income,
-          total_holding_income: data.total_holding_income,
-          daily_pct: data.daily_pct,
-          update_time: data.update_time,
-          used_source: source,
-          used_date: data.used_date,
-          switch_at: null,
-          transition_progress: null,
-          official_updated: false,
-          holiday_mode: false,
-        });
-      }
-    }}
-  );
-
-  // WebSocket for real-time news updates
-  const { lastMessage: newsMessage } = useWebSocket<WSNewsUpdate>(
-    "/ws/news",
-    { onMessage: (data) => {
-      if (data.type === "news_update") {
-        const newItem: NewsItem = {
-          title: data.title,
-          link: data.link ?? undefined,
-          published_at: data.published_at ?? undefined,
-          summary: data.summary ?? undefined,
-          source: data.source ?? undefined,
-        };
-        setNewsItems(prev => {
-          const exists = prev.some(item => 
-            (item.link || item.title) === (newItem.link || newItem.title)
-          );
-          if (exists) return prev;
-          return [newItem, ...prev].slice(0, NEWS_MAX_ITEMS);
-        });
-      }
-    }}
-  );
-
+  const [quickTradeCode, setQuickTradeCode] = useState("");
   const [showTransactionSheet, setShowTransactionSheet] = useState(false);
   const [transType, setTransType] = useState<"buy" | "sell">("buy");
   const [transAmount, setTransAmount] = useState("");
@@ -238,51 +159,103 @@ export default function Home() {
   const [transPrice, setTransPrice] = useState("");
   const [transDate, setTransDate] = useState("");
   const [isAfter3PM, setIsAfter3PM] = useState(false);
-  
+  const [chartPeriod, setChartPeriod] = useState<"intraday" | "1m" | "3m" | "1y">("1m");
+  const newsSource = "rss";
+
+  const selectedFund = useMemo(() => funds.find((item) => item.code === selectedCode), [funds, selectedCode]);
+
+  const fundsWithComputed = useMemo(
+    () =>
+      funds.map((fund) => ({
+        ...fund,
+        computedAmount: fund.mode === "amount" ? fund.amount : fund.shares * (fund.nav ?? 0),
+      })),
+    [funds]
+  );
+
+  useWebSocket<WSEstimateUpdate>(selectedCode ? `/ws/estimate/${selectedCode}` : "", {
+    onMessage: (data) => {
+      if (data.type !== "estimate_update") return;
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              estimate_pct: data.estimate_pct ?? prev.estimate_pct,
+              fund_gz_pct: data.estimate_pct ?? prev.fund_gz_pct,
+              fund_gz_nav: data.estimate_nav ?? prev.fund_gz_nav,
+              fund_gz_time: data.update_time ?? prev.fund_gz_time,
+            }
+          : null
+      );
+    },
+  });
+
+  useWebSocket<WSPortfolioUpdate>("/ws/portfolio", {
+    onMessage: (data) => {
+      if (data.type !== "portfolio_update") return;
+      const validSources = ["realtime", "official", "transition", "holdings"] as const;
+      const source = validSources.includes(data.used_source as (typeof validSources)[number])
+        ? (data.used_source as (typeof validSources)[number])
+        : "holdings";
+      setPortfolio({
+        total_amount: data.total_amount,
+        total_daily_income: data.total_daily_income,
+        total_holding_income: data.total_holding_income,
+        daily_pct: data.daily_pct,
+        update_time: data.update_time,
+        used_source: source,
+        used_date: data.used_date,
+        switch_at: null,
+        transition_progress: null,
+        official_updated: false,
+        holiday_mode: false,
+      });
+    },
+  });
+
+  useWebSocket<WSNewsUpdate>("/ws/news", {
+    onMessage: (data) => {
+      if (data.type !== "news_update") return;
+      const newItem: NewsItem = {
+        title: data.title,
+        link: data.link ?? undefined,
+        published_at: data.published_at ?? undefined,
+        summary: data.summary ?? undefined,
+        source: data.source ?? undefined,
+      };
+      setNewsItems((prev) => {
+        const exists = prev.some((item) => (item.link || item.title) === (newItem.link || newItem.title));
+        if (exists) return prev;
+        return [newItem, ...prev].slice(0, NEWS_MAX_ITEMS);
+      });
+    },
+  });
+
   useEffect(() => {
-    if (showTransactionSheet) {
-      const now = new Date();
-      // 默认设置为今天日期
-      setTransDate(now.toISOString().split("T")[0]);
-      // 默认根据当前时间设置
-      setIsAfter3PM(now.getHours() >= 15);
-      
-      // Auto-fill price based on best available data
-      const estimateNav = detail?.fund_gz_nav;
-      const historyNav = navItems.length ? navItems[navItems.length-1].nav : 0;
-      
-      const bestPrice = estimateNav || historyNav;
-      if (bestPrice) {
-        setTransPrice(String(bestPrice));
-      }
-    }
+    if (!showTransactionSheet) return;
+    const now = new Date();
+    setTransDate(now.toISOString().split("T")[0]);
+    setIsAfter3PM(now.getHours() >= 15);
+
+    const estimateNav = detail?.fund_gz_nav;
+    const historyNav = navItems.length ? navItems[navItems.length - 1].nav : 0;
+    const bestPrice = estimateNav || historyNav;
+    if (bestPrice) setTransPrice(String(bestPrice));
   }, [showTransactionSheet, detail, navItems]);
 
-  // Auto-calculate Shares when Amount changes (Buy)
   useEffect(() => {
     if (showTransactionSheet && transType === "buy" && selectedFund?.mode !== "amount") {
-       const amount = parseFloat(transAmount);
-       const price = parseFloat(transPrice);
-       if (amount > 0 && price > 0) {
-         // Fee is ignored for simplicity or could be added later
-         setTransShares((amount / price).toFixed(2));
-       }
+      const amount = parseFloat(transAmount);
+      const price = parseFloat(transPrice);
+      if (amount > 0 && price > 0) {
+        setTransShares((amount / price).toFixed(2));
+      }
     }
   }, [transAmount, transPrice, transType, showTransactionSheet, selectedFund]);
 
-  // Auto-calculate Amount when Shares changes (Sell)
-  // Actually usually we sell shares, and get amount. 
-  // But for "Reduce Position", user might input Shares.
-  
-  // chartRef is no longer needed in page.tsx as it is moved to FundChart component
-  // const chartRef = useRef<HTMLDivElement>(null);
-
-  const [chartPeriod, setChartPeriod] = useState<"intraday" | "1m" | "3m" | "1y">("1m");
-
   const chartOption = useMemo(() => {
-    if (chartPeriod === "intraday" && !navItems.length) return null;
-    
     if (!navItems.length) return null;
+    if (chartPeriod === "intraday" && !navItems.length) return null;
 
     const chartData = [...navItems].reverse();
 
@@ -292,72 +265,69 @@ export default function Home() {
       xAxis: {
         type: "category" as const,
         data: chartData.map((item) => item.date),
-        axisLabel: { color: "#6b6258", fontFamily: "monospace", fontSize: 10 },
+        axisLabel: { color: "#6e675d", fontFamily: "Consolas", fontSize: 10 },
         axisLine: { show: false },
         axisTick: { show: false },
         boundaryGap: false,
       },
       yAxis: {
         type: "value" as const,
-        axisLabel: { color: "#6b6258", fontFamily: "monospace", fontSize: 10 },
-        splitLine: { lineStyle: { color: "#ded6c8", type: "dashed" as const } },
+        axisLabel: { color: "#6e675d", fontFamily: "Consolas", fontSize: 10 },
+        splitLine: { lineStyle: { color: "#c9beae", type: "dashed" as const } },
         scale: true,
       },
       tooltip: {
         trigger: "axis" as const,
-        backgroundColor: "rgba(31, 31, 28, 0.95)",
-        borderColor: "transparent",
+        backgroundColor: "rgba(23, 21, 18, 0.96)",
+        borderColor: "#6e675d",
         textStyle: { color: "#f6f1e7", fontSize: 12 },
         padding: [8, 12],
         axisPointer: {
           type: "cross" as const,
           label: {
-            backgroundColor: "#2f5b43"
-          }
+            backgroundColor: "#274438",
+          },
         },
         formatter: (params: TooltipComponentFormatterCallbackParams) => {
           const item = Array.isArray(params) ? params[0] : params;
           if (!item) return "";
           const value = item.value;
-          const valueStr = typeof value === 'number' ? value.toFixed(4) : String(value ?? '0');
-          return `
-            <div class="font-mono">
-              <div class="text-[10px] text-muted-foreground mb-1">${String(item.name ?? '')}</div>
-              <div class="font-bold text-base">${valueStr}</div>
-            </div>
-          `;
-        }
+          const valueStr = typeof value === "number" ? value.toFixed(4) : String(value ?? "0");
+          return `<div class="font-mono"><div style="font-size:10px;margin-bottom:4px;opacity:.72">${String(
+            item.name ?? ""
+          )}</div><div style="font-weight:700;font-size:16px">${valueStr}</div></div>`;
+        },
       },
       series: [
         {
           data: chartData.map((item) => item.nav),
           type: "line" as const,
-          smooth: true,
+          smooth: false,
           showSymbol: false,
-          lineStyle: { color: "#1f4d3a", width: 2 },
-          areaStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: "rgba(31, 77, 58, 0.2)" },
-              { offset: 1, color: "rgba(31, 77, 58, 0)" }
-            ])
-          },
-          markLine: selectedFund?.cost && selectedFund.cost > 0 ? {
-            symbol: "none" as const,
-            data: [{
-              yAxis: selectedFund.cost,
-              label: {
-                formatter: "持仓成本",
-                position: "start" as const,
-                color: "#f59e0b",
-                fontSize: 10
-              },
-              lineStyle: {
-                color: "#f59e0b",
-                type: "dashed" as const,
-                width: 1
-              }
-            }]
-          } : undefined
+          lineStyle: { color: "#274438", width: 2 },
+          areaStyle: { color: "rgba(39, 68, 56, 0.08)" },
+          markLine:
+            selectedFund?.cost && selectedFund.cost > 0
+              ? {
+                  symbol: "none" as const,
+                  data: [
+                    {
+                      yAxis: selectedFund.cost,
+                      label: {
+                        formatter: "持仓成本",
+                        position: "start" as const,
+                        color: "#6c2f2a",
+                        fontSize: 10,
+                      },
+                      lineStyle: {
+                        color: "#6c2f2a",
+                        type: "dashed" as const,
+                        width: 1,
+                      },
+                    },
+                  ],
+                }
+              : undefined,
         },
       ],
     };
@@ -379,12 +349,8 @@ export default function Home() {
     const data = await listFunds(keyword);
     setFunds(data);
     setSelectedCode((current) => {
-      if (!current && data.length) {
-        return data[0].code;
-      }
-      if (current && !data.find((item) => item.code === current)) {
-        return data[0]?.code ?? "";
-      }
+      if (!current && data.length) return data[0].code;
+      if (current && !data.find((item) => item.code === current)) return data[0]?.code ?? "";
       return current;
     });
   }, []);
@@ -402,16 +368,14 @@ export default function Home() {
 
       const [detailRes, navRes] = await Promise.all([
         fetchEstimate(code),
-        chartPeriod !== "intraday" 
-          ? fetchNavHistory(code, limit) 
-          : fetchNavHistory(code, 0) // Use 0 for intraday convention
+        chartPeriod !== "intraday" ? fetchNavHistory(code, limit) : fetchNavHistory(code, 0),
       ]);
+
       setDetail(detailRes);
       setNavItems(navRes.items ?? []);
-      const fund = funds.find((item) => item.code === code);
-      syncInputsFromFund(fund);
+      syncInputsFromFund(funds.find((item) => item.code === code));
     },
-    [funds, syncInputsFromFund, chartPeriod]
+    [chartPeriod, funds, syncInputsFromFund]
   );
 
   const loadNews = useCallback(async () => {
@@ -423,16 +387,13 @@ export default function Home() {
       setSelectedNewsKey((current) => {
         if (current) return current;
         const first = items[0];
-        if (!first) return "";
-        return first.link || first.title;
+        return first ? first.link || first.title : "";
       });
       setAnalysisCache(() => {
         const next: Record<string, NewsAnalysisResponse> = {};
         items.forEach((item) => {
           const key = item.link || item.title;
-          if (key && item.analysis) {
-            next[key] = item.analysis;
-          }
+          if (key && item.analysis) next[key] = item.analysis;
         });
         return next;
       });
@@ -441,7 +402,6 @@ export default function Home() {
       setNewsLoading(false);
     }
   }, [newsSource]);
-
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -469,16 +429,13 @@ export default function Home() {
       try {
         await loadNews();
       } catch (err) {
-        if (err instanceof Error) {
-          pushStatus(err.message);
-        }
+        if (err instanceof Error) pushStatus(err.message);
       }
     };
-    run();
+
+    void run();
     const handle = setInterval(run, NEWS_REFRESH_INTERVAL_MS);
-    return () => {
-      clearInterval(handle);
-    };
+    return () => clearInterval(handle);
   }, [loadNews, pushStatus]);
 
   useEffect(() => {
@@ -488,9 +445,7 @@ export default function Home() {
         const keys = new Set(newsItems.map((item) => item.link || item.title).filter(Boolean));
         const next: Record<string, NewsAnalysisResponse> = {};
         Object.keys(prev).forEach((key) => {
-          if (keys.has(key)) {
-            next[key] = prev[key];
-          }
+          if (keys.has(key)) next[key] = prev[key];
         });
         return next;
       });
@@ -511,29 +466,9 @@ export default function Home() {
     return () => clearTimeout(handle);
   }, [marketQuery]);
 
-  useEffect(() => {
-    // chartRef logic removed from page.tsx
-    /*
-    if (!chartRef.current || !chartOption) return;
-    const chart = echarts.init(chartRef.current);
-    chart.setOption(chartOption);
-    const handleResize = () => chart.resize();
-    window.addEventListener("resize", handleResize);
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      chart.dispose();
-    };
-    */
-  }, [chartOption]);
-
   const handleAddFund = async (
     code: string,
-    holding: {
-      mode: "amount" | "shares";
-      amount: number;
-      shares: number;
-      cost: number;
-    } | null,
+    holding: { mode: "amount" | "shares"; amount: number; shares: number; cost: number } | null,
     transaction?: {
       type: "buy" | "sell";
       amount: number;
@@ -551,27 +486,16 @@ export default function Home() {
       const newFund = await addFund(code);
 
       setFunds((prev) => {
-        const exists = prev.some((f) => f.code === code);
-        if (exists) return prev;
+        if (prev.some((fund) => fund.code === code)) return prev;
         return [...prev, newFund];
       });
 
       setSelectedCode(code);
 
       if (holding && holding.mode === "amount" && holding.amount > 0) {
-        await updateFundAmount(code, {
-          amount: holding.amount,
-          mode: "amount",
-          shares: 0,
-          cost: 0,
-        });
+        await updateFundAmount(code, { amount: holding.amount, mode: "amount", shares: 0, cost: 0 });
       } else if (holding && holding.mode === "shares" && holding.shares > 0) {
-        await updateFundAmount(code, {
-          amount: 0,
-          mode: "shares",
-          shares: holding.shares,
-          cost: holding.cost,
-        });
+        await updateFundAmount(code, { amount: 0, mode: "shares", shares: holding.shares, cost: holding.cost });
       }
 
       if (transaction && transaction.amount > 0 && transaction.price > 0) {
@@ -584,18 +508,16 @@ export default function Home() {
           price: transaction.price,
           trans_date: transaction.trans_date,
           is_after_3pm: transaction.is_after_3pm,
-          mode: mode,
+          mode,
         });
       }
 
-      pushStatus(holding || transaction ? "基金已添加" : "基金已加入");
+      pushStatus(holding || transaction ? "基金已加入并完成初始化" : "基金已加入监控");
 
       await Promise.all([loadFunds(listQuery), loadPortfolio()]);
-      if (code) {
-        await loadDetail(code);
-      }
+      if (code) await loadDetail(code);
     } catch (err) {
-      pushStatus(err instanceof Error ? err.message : "添加失败");
+      pushStatus(err instanceof Error ? err.message : "基金加入失败");
     } finally {
       setAddingFund(false);
     }
@@ -612,7 +534,7 @@ export default function Home() {
       setShowHoldingSheet(false);
       pushStatus("基金已移除");
     } catch (err) {
-      pushStatus(err instanceof Error ? err.message : "删除失败");
+      pushStatus(err instanceof Error ? err.message : "基金移除失败");
     }
   };
 
@@ -621,14 +543,16 @@ export default function Home() {
     const amount = Number.parseFloat(inputAmount || "0");
     const shares = Number.parseFloat(inputShares || "0");
     const cost = Number.parseFloat(inputCost || "0");
+
     if (editMode === "amount" && Number.isNaN(amount)) {
       pushStatus("请输入有效金额");
       return;
     }
     if (editMode === "shares" && (Number.isNaN(shares) || Number.isNaN(cost))) {
-      pushStatus("请输入有效份额与成本");
+      pushStatus("请输入有效份额和成本");
       return;
     }
+
     try {
       await updateFundAmount(selectedCode, {
         amount: editMode === "amount" ? amount : 0,
@@ -642,13 +566,13 @@ export default function Home() {
       setShowHoldingSheet(false);
       pushStatus("持仓已更新");
     } catch (err) {
-      pushStatus(err instanceof Error ? err.message : "更新失败");
+      pushStatus(err instanceof Error ? err.message : "持仓更新失败");
     }
   };
 
   const handleTransaction = async () => {
     if (!selectedFund) return;
-    
+
     const tAmount = parseFloat(transAmount) || 0;
     const tShares = parseFloat(transShares) || 0;
     const tPrice = parseFloat(transPrice) || 0;
@@ -676,26 +600,25 @@ export default function Home() {
         price: tPrice,
         trans_date: transDate,
         is_after_3pm: isAfter3PM,
-        mode: mode,
+        mode,
       });
-      
+
       await loadFunds(listQuery);
       await loadPortfolio();
       await loadDetail(selectedFund.code);
       setShowTransactionSheet(false);
       pushStatus("交易已记录");
-      // Reset inputs
       setTransAmount("");
       setTransShares("");
       setTransPrice("");
       setTransDate("");
     } catch (err) {
-      pushStatus(err instanceof Error ? err.message : "交易失败");
+      pushStatus(err instanceof Error ? err.message : "交易记录失败");
     }
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
+    <div className="flex min-h-screen flex-col bg-background text-foreground font-sans">
       <HeaderBar
         headerRef={headerRef}
         marketQuery={marketQuery}
@@ -710,7 +633,7 @@ export default function Home() {
       />
 
       <div className="flex-1 overflow-hidden">
-        <div className="mx-auto w-full max-w-[1600px] px-6 py-6 h-[calc(100vh-80px)] grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)_340px] gap-8">
+        <div className="mx-auto grid h-[calc(100vh-84px)] w-full max-w-[1680px] grid-cols-1 gap-6 px-6 py-6 lg:grid-cols-[320px_minmax(0,1fr)_360px]">
           <FundListSidebar
             funds={fundsWithComputed}
             selectedCode={selectedCode}
@@ -743,11 +666,7 @@ export default function Home() {
             }}
           />
 
-          <NewsTimeline
-            newsItems={newsItems}
-            selectedNewsKey={selectedNewsKey}
-            onSelectNewsKey={setSelectedNewsKey}
-          />
+          <NewsTimeline newsItems={newsItems} selectedNewsKey={selectedNewsKey} onSelectNewsKey={setSelectedNewsKey} />
         </div>
       </div>
 
@@ -805,12 +724,12 @@ export default function Home() {
           setShowQuickTradeSheet(false);
           setQuickTradeCode("");
         }}
-        selectedFund={funds.find(f => f.code === quickTradeCode)}
+        selectedFund={funds.find((fund) => fund.code === quickTradeCode)}
         detail={quickTradeCode === selectedCode ? detail : null}
         onQuickTrade={async (fundCode, transaction) => {
-          const fund = funds.find(f => f.code === fundCode);
+          const fund = funds.find((item) => item.code === fundCode);
           if (!fund) return;
-          
+
           try {
             await addTransaction({
               fund_code: fundCode,
@@ -822,13 +741,13 @@ export default function Home() {
               is_after_3pm: transaction.is_after_3pm,
               mode: transaction.mode,
             });
-            
+
             await loadFunds(listQuery);
             await loadPortfolio();
             await loadDetail(fundCode);
             pushStatus("交易已记录");
           } catch (err) {
-            pushStatus(err instanceof Error ? err.message : "交易失败");
+            pushStatus(err instanceof Error ? err.message : "交易记录失败");
           }
         }}
       />

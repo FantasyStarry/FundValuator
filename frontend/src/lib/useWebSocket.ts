@@ -36,24 +36,36 @@ export function useWebSocket<T = unknown>(
   const [lastMessage, setLastMessage] = useState<T | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectCountRef = useRef(0);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const connectRef = useRef<() => void>(() => {});
+
+  const clearReconnectTimer = useCallback(() => {
+    if (!reconnectTimeoutRef.current) return;
+    clearTimeout(reconnectTimeoutRef.current);
+    reconnectTimeoutRef.current = null;
+  }, []);
 
   const getWsUrl = useCallback(() => {
-    if (typeof window === "undefined") return "";
+    if (typeof window === "undefined" || !endpoint) return "";
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     return `${protocol}//${window.location.host}${endpoint}`;
   }, [endpoint]);
 
+  const disconnect = useCallback(() => {
+    clearReconnectTimer();
+    reconnectCountRef.current = maxReconnectAttempts;
+    wsRef.current?.close();
+    wsRef.current = null;
+    setIsConnected(false);
+  }, [clearReconnectTimer, maxReconnectAttempts]);
+
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
-    
+
     const url = getWsUrl();
     if (!url) return;
-
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return;
-    }
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
     try {
       const ws = new WebSocket(url);
@@ -71,15 +83,12 @@ export function useWebSocket<T = unknown>(
         setIsConnected(false);
         onClose?.();
 
-        if (
-          reconnectCountRef.current < maxReconnectAttempts &&
-          mountedRef.current
-        ) {
+        if (reconnectCountRef.current < maxReconnectAttempts) {
+          clearReconnectTimer();
           reconnectTimeoutRef.current = setTimeout(() => {
-            if (mountedRef.current) {
-              reconnectCountRef.current += 1;
-              connect();
-            }
+            if (!mountedRef.current) return;
+            reconnectCountRef.current += 1;
+            connectRef.current();
           }, reconnectInterval);
         }
       };
@@ -102,7 +111,11 @@ export function useWebSocket<T = unknown>(
     } catch (error) {
       console.error("Failed to create WebSocket connection:", error);
     }
-  }, [getWsUrl, maxReconnectAttempts, reconnectInterval, onMessage, onOpen, onClose, onError]);
+  }, [clearReconnectTimer, getWsUrl, maxReconnectAttempts, onClose, onError, onMessage, onOpen, reconnectInterval]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const send = useCallback((data: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -110,32 +123,24 @@ export function useWebSocket<T = unknown>(
     }
   }, []);
 
-  const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    reconnectCountRef.current = maxReconnectAttempts;
-    wsRef.current?.close();
-    wsRef.current = null;
-    setIsConnected(false);
-  }, [maxReconnectAttempts]);
-
   const reconnect = useCallback(() => {
     disconnect();
     reconnectCountRef.current = 0;
-    connect();
-  }, [disconnect, connect]);
+    connectRef.current();
+  }, [disconnect]);
 
   useEffect(() => {
     mountedRef.current = true;
-    connect();
+    connectRef.current();
 
     return () => {
       mountedRef.current = false;
-      disconnect();
+      clearReconnectTimer();
+      wsRef.current?.close();
+      wsRef.current = null;
+      setIsConnected(false);
     };
-  }, [connect, disconnect]);
+  }, [clearReconnectTimer, connect]);
 
   useEffect(() => {
     const pingInterval = setInterval(() => {

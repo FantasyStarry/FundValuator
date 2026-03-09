@@ -1,29 +1,24 @@
-import '@testing-library/jest-dom/vitest'
-import { vi } from 'vitest'
-import { cleanup } from '@testing-library/react'
-import * as React from 'react'
+import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach, vi } from "vitest";
 
-// 每个测试后清理
 afterEach(() => {
-  cleanup()
-})
+  cleanup();
+});
 
-// Mock IntersectionObserver
 global.IntersectionObserver = vi.fn().mockImplementation(() => ({
   observe: vi.fn(),
   unobserve: vi.fn(),
   disconnect: vi.fn(),
-}))
+}));
 
-// Mock ResizeObserver
 global.ResizeObserver = vi.fn().mockImplementation(() => ({
   observe: vi.fn(),
   unobserve: vi.fn(),
   disconnect: vi.fn(),
-}))
+}));
 
-// Mock matchMedia
-Object.defineProperty(window, 'matchMedia', {
+Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: vi.fn().mockImplementation((query: string) => ({
     matches: false,
@@ -35,55 +30,44 @@ Object.defineProperty(window, 'matchMedia', {
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
   })),
-})
+});
 
-// Mock WebSocket
 class MockWebSocket {
-  static CONNECTING = 0
-  static OPEN = 1
-  static CLOSING = 2
-  static CLOSED = 3
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
 
-  readyState = MockWebSocket.OPEN
-  onopen: ((event: Event) => void) | null = null
-  onclose: ((event: CloseEvent) => void) | null = null
-  onmessage: ((event: MessageEvent) => void) | null = null
-  onerror: ((event: Event) => void) | null = null
+  readyState = MockWebSocket.OPEN;
+  onopen: ((event: Event) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
 
   constructor(public url: string) {
     setTimeout(() => {
-      if (this.onopen) {
-        this.onopen(new Event('open'))
-      }
-    }, 0)
+      this.onopen?.(new Event("open"));
+    }, 0);
   }
 
-  send = vi.fn((data: string) => {})
+  send = vi.fn();
+
   close = vi.fn(() => {
-    this.readyState = MockWebSocket.CLOSED
-    if (this.onclose) {
-      this.onclose(new CloseEvent('close'))
-    }
-  })
+    this.readyState = MockWebSocket.CLOSED;
+    this.onclose?.(new CloseEvent("close"));
+  });
 
-  // Helper method to simulate receiving a message
   simulateMessage(data: unknown) {
-    if (this.onmessage) {
-      this.onmessage(new MessageEvent('message', { data: JSON.stringify(data) }))
-    }
+    this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(data) }));
   }
 
-  // Helper method to simulate an error
   simulateError() {
-    if (this.onerror) {
-      this.onerror(new Event('error'))
-    }
+    this.onerror?.(new Event("error"));
   }
 }
 
-vi.stubGlobal('WebSocket', MockWebSocket)
+vi.stubGlobal("WebSocket", MockWebSocket);
 
-// 创建 LinearGradient 类
 class MockLinearGradient {
   constructor(
     public x: number,
@@ -94,14 +78,13 @@ class MockLinearGradient {
   ) {}
 }
 
-// Mock ECharts - 完整模拟
 const mockChartInstance = {
   setOption: vi.fn(),
   resize: vi.fn(),
   dispose: vi.fn(),
   getOption: vi.fn(() => ({})),
   clear: vi.fn(),
-}
+};
 
 const echartsMock = {
   init: vi.fn(() => mockChartInstance),
@@ -145,18 +128,15 @@ const echartsMock = {
     clone: vi.fn(),
     merge: vi.fn(),
   },
-}
+};
 
-vi.mock('echarts', () => ({
+vi.mock("echarts", () => ({
   default: echartsMock,
   ...echartsMock,
-}))
+}));
 
-// Mock fetch
-const originalFetch = global.fetch
-global.fetch = vi.fn()
+global.fetch = vi.fn() as unknown as typeof fetch;
 
-// Mock localStorage
 const localStorageMock = {
   getItem: vi.fn(),
   setItem: vi.fn(),
@@ -164,10 +144,10 @@ const localStorageMock = {
   clear: vi.fn(),
   length: 0,
   key: vi.fn(),
-}
-Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
-})
+};
 
-// Export mock WebSocket for use in tests
-export { MockWebSocket, mockChartInstance, echartsMock }
+Object.defineProperty(window, "localStorage", {
+  value: localStorageMock,
+});
+
+export { MockWebSocket, mockChartInstance, echartsMock };

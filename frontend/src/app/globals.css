@@ -1,271 +1,138 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
 @config "../../tailwind.config.ts";
 @import "tailwindcss";
 
 @layer base {
   :root {
-    --background: #f8f9fa;
-    --foreground: #1a1a1a;
-
-    --card: #ffffff;
-    --card-foreground: #1a1a1a;
- 
-    --popover: #ffffff;
-    --popover-foreground: #1a1a1a;
- 
-    --primary: #2563eb;
-    --primary-foreground: #ffffff;
- 
-    --secondary: #f1f3f4;
-    --secondary-foreground: #5a5a5a;
- 
-    --muted: #f8f9fa;
-    --muted-foreground: #86868b;
- 
-    --accent: #2563eb;
-    --accent-foreground: #ffffff;
-
-    --destructive: #dc2626;
-    --destructive-foreground: #ffffff;
-    
-    --gain: #16a34a;
-    --gain-foreground: #ffffff;
-    
-    --loss: #dc2626;
-    --loss-foreground: #ffffff;
-
-    --border: #e5e5e5;
-    --input: #f1f3f4;
-    --ring: rgba(37, 99, 235, 0.3);
- 
-    --radius: 8px;
-    
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-    --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+    --background: #ece7dc;
+    --foreground: #171512;
+    --card: #f6f1e7;
+    --card-foreground: #171512;
+    --popover: #f6f1e7;
+    --popover-foreground: #171512;
+    --primary: #274438;
+    --primary-foreground: #f7f3eb;
+    --secondary: #d9d0c1;
+    --secondary-foreground: #37322b;
+    --muted: #e2dacd;
+    --muted-foreground: #6e675d;
+    --accent: #d2c6b4;
+    --accent-foreground: #171512;
+    --destructive: #6c2f2a;
+    --destructive-foreground: #f7f3eb;
+    --gain: #274438;
+    --gain-foreground: #f7f3eb;
+    --loss: #6c2f2a;
+    --loss-foreground: #f7f3eb;
+    --border: #b8ae9d;
+    --input: #f3eee4;
+    --ring: rgba(39, 68, 56, 0.22);
+    --radius: 2px;
+    --panel-shadow: 0 10px 24px rgba(23, 21, 18, 0.08);
   }
 
-  .dark {
-    --background: #0a0a0a;
-    --foreground: #f5f5f5;
-
-    --card: #141414;
-    --card-foreground: #f5f5f5;
- 
-    --popover: #1a1a1a;
-    --popover-foreground: #f5f5f5;
- 
-    --primary: #3b82f6;
-    --primary-foreground: #ffffff;
- 
-    --secondary: #262626;
-    --secondary-foreground: #a3a3a3;
- 
-    --muted: #171717;
-    --muted-foreground: #737373;
- 
-    --accent: #3b82f6;
-    --accent-foreground: #ffffff;
-
-    --destructive: #ef4444;
-    --destructive-foreground: #ffffff;
-    
-    --gain: #22c55e;
-    --gain-foreground: #ffffff;
-    
-    --loss: #ef4444;
-    --loss-foreground: #ffffff;
-
-    --border: #262626;
-    --input: #262626;
-    --ring: rgba(59, 130, 246, 0.3);
-  }
-}
-
-@layer base {
   * {
     border-color: var(--border);
   }
-  
+
   html {
-    scroll-behavior: smooth;
+    scroll-behavior: auto;
   }
-  
+
   body {
-    background-color: var(--background);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0)),
+      repeating-linear-gradient(
+        90deg,
+        rgba(23, 21, 18, 0.02) 0,
+        rgba(23, 21, 18, 0.02) 1px,
+        transparent 1px,
+        transparent 96px
+      ),
+      var(--background);
     color: var(--foreground);
-    font-family: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  
+
   .font-mono {
-    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+    font-family: Consolas, "Courier New", monospace;
   }
 }
 
 @layer utilities {
   .custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
+    width: 8px;
+    height: 8px;
   }
+
   .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
   }
+
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 2px;
+    background: rgba(110, 103, 93, 0.45);
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
+
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: var(--muted-foreground);
+    background: rgba(110, 103, 93, 0.65);
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
-  
-  .flash-update {
-    animation: flash-number 0.4s ease-out;
+
+  .surface-panel {
+    background: rgba(246, 241, 231, 0.92);
+    border: 1px solid rgba(184, 174, 157, 0.9);
+    box-shadow: var(--panel-shadow);
+    backdrop-filter: blur(6px);
   }
-  
-  .fade-in {
-    animation: fade-in 0.2s ease-out;
-  }
-  
-  .slide-up {
-    animation: slide-up 0.3s ease-out;
-  }
-  
-  .card-hover {
-    transition: box-shadow 0.2s ease, transform 0.2s ease;
-  }
-  .card-hover:hover {
-    box-shadow: var(--shadow);
-  }
-  
-  .live-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--gain);
-    animation: live-pulse 2s ease-in-out infinite;
-  }
-  
-  @keyframes flash-number {
-    0% { background-color: rgba(34, 197, 94, 0.2); }
-    100% { background-color: transparent; }
-  }
-  
-  @keyframes fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  
-  @keyframes slide-up {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  
-  @keyframes live-pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(0.9); }
+
+  .section-label {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 }
 
 @layer components {
   .stat-card {
-    background: var(--card);
+    background: rgba(246, 241, 231, 0.84);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px;
-    transition: box-shadow 0.2s ease;
+    padding: 14px;
+    min-height: 92px;
   }
-  
-  .stat-card:hover {
-    box-shadow: var(--shadow-sm);
-  }
-  
-  .fund-item {
+
+  .data-tile {
+    background: rgba(226, 218, 205, 0.45);
+    border: 1px solid rgba(184, 174, 157, 0.85);
     padding: 12px;
-    border-radius: var(--radius);
-    cursor: pointer;
-    transition: background-color 0.15s ease;
   }
-  
+
+  .status-strip {
+    border-left: 3px solid var(--primary);
+    background: rgba(39, 68, 56, 0.06);
+    padding: 10px 12px;
+  }
+
+  .fund-item {
+    border: 1px solid transparent;
+    background: transparent;
+    padding: 12px;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
   .fund-item:hover {
-    background-color: var(--muted);
+    background: rgba(217, 208, 193, 0.35);
+    border-color: rgba(184, 174, 157, 0.75);
   }
-  
+
   .fund-item.selected {
-    background-color: var(--primary);
-    color: var(--primary-foreground);
-  }
-  
-  .btn-primary {
-    background-color: var(--primary);
-    color: var(--primary-foreground);
-    padding: 8px 16px;
-    border-radius: var(--radius);
-    font-weight: 500;
-    font-size: 14px;
-    transition: opacity 0.15s ease, transform 0.1s ease;
-  }
-  
-  .btn-primary:hover {
-    opacity: 0.9;
-  }
-  
-  .btn-primary:active {
-    transform: scale(0.98);
-  }
-  
-  .btn-secondary {
-    background-color: var(--secondary);
-    color: var(--secondary-foreground);
-    padding: 8px 16px;
-    border-radius: var(--radius);
-    font-weight: 500;
-    font-size: 14px;
-    transition: background-color 0.15s ease;
-  }
-  
-  .btn-secondary:hover {
-    background-color: var(--border);
-  }
-  
-  .input-field {
-    background-color: var(--input);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 8px 12px;
-    font-size: 14px;
-    color: var(--foreground);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  }
-  
-  .input-field:focus {
-    outline: none;
+    background: rgba(39, 68, 56, 0.08);
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px var(--ring);
-  }
-  
-  .input-field::placeholder {
-    color: var(--muted-foreground);
-  }
-  
-  .badge-gain {
-    background-color: rgba(34, 197, 94, 0.1);
-    color: var(--gain);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-  
-  .badge-loss {
-    background-color: rgba(239, 68, 68, 0.1);
-    color: var(--loss);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 600;
   }
 }

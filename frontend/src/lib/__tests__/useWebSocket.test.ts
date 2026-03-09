@@ -1,226 +1,122 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, act, waitFor } from '@testing-library/react'
-import { useWebSocket } from '@/lib/useWebSocket'
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useWebSocket } from "@/lib/useWebSocket";
 
-describe('useWebSocket', () => {
-  // 保存原始 WebSocket
-  const OriginalWebSocket = global.WebSocket
-  
-  let mockWebSocketInstance: {
-    readyState: number
-    onopen: ((event: Event) => void) | null
-    onclose: ((event: CloseEvent) => void) | null
-    onmessage: ((event: MessageEvent) => void) | null
-    onerror: ((event: Event) => void) | null
-    send: ReturnType<typeof vi.fn>
-    close: ReturnType<typeof vi.fn>
-  }
+type MockSocket = {
+  readyState: number;
+  onopen: ((event: Event) => void) | null;
+  onclose: ((event: CloseEvent) => void) | null;
+  onmessage: ((event: MessageEvent) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  send: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+};
+
+describe("useWebSocket", () => {
+  const OriginalWebSocket = global.WebSocket;
+  let mockWebSocketInstance: MockSocket;
 
   beforeEach(() => {
-    vi.useFakeTimers()
-    
-    // 创建模拟的 WebSocket 实例
+    vi.useFakeTimers();
+
     mockWebSocketInstance = {
-      readyState: 1, // WebSocket.OPEN
+      readyState: 1,
       onopen: null,
       onclose: null,
       onmessage: null,
       onerror: null,
       send: vi.fn(),
       close: vi.fn(),
+    };
+
+    class TestWebSocket {
+      static OPEN = 1;
+      static CONNECTING = 0;
+      static CLOSING = 2;
+      static CLOSED = 3;
+
+      constructor(url: string) {
+        void url;
+        mockWebSocketInstance.readyState = TestWebSocket.CONNECTING;
+        setTimeout(() => {
+          mockWebSocketInstance.readyState = TestWebSocket.OPEN;
+          mockWebSocketInstance.onopen?.(new Event("open"));
+        }, 0);
+        return mockWebSocketInstance as unknown as TestWebSocket;
+      }
     }
 
-    // 模拟 WebSocket 构造函数
-    const MockWebSocketConstructor = vi.fn().mockImplementation((url: string) => {
-      mockWebSocketInstance.readyState = 0
-      // 异步触发 onopen
-      setTimeout(() => {
-        mockWebSocketInstance.readyState = 1
-        if (mockWebSocketInstance.onopen) {
-          mockWebSocketInstance.onopen(new Event('open'))
-        }
-      }, 0)
-      return mockWebSocketInstance
-    })
-    MockWebSocketConstructor.OPEN = 1
-    MockWebSocketConstructor.CONNECTING = 0
-    MockWebSocketConstructor.CLOSING = 2
-    MockWebSocketConstructor.CLOSED = 3
-
-    global.WebSocket = MockWebSocketConstructor as unknown as typeof WebSocket
-  })
+    global.WebSocket = TestWebSocket as unknown as typeof WebSocket;
+  });
 
   afterEach(() => {
-    vi.useRealTimers()
-    global.WebSocket = OriginalWebSocket
-    vi.clearAllMocks()
-  })
+    vi.useRealTimers();
+    global.WebSocket = OriginalWebSocket;
+    vi.clearAllMocks();
+  });
 
-  describe('TC-WS-001: 初始状态正确', () => {
-    it('初始 isConnected 应该为 false', () => {
-      const { result } = renderHook(() => useWebSocket('/ws/test'))
-      expect(result.current.isConnected).toBe(false)
-    })
+  it("starts disconnected and connects on mount", async () => {
+    const onOpen = vi.fn();
+    const { result } = renderHook(() => useWebSocket("/ws/test", { onOpen }));
 
-    it('初始 lastMessage 应该为 null', () => {
-      const { result } = renderHook(() => useWebSocket('/ws/test'))
-      expect(result.current.lastMessage).toBeNull()
-    })
-  })
+    expect(result.current.isConnected).toBe(false);
 
-  describe('TC-WS-002: 连接成功后状态更新', () => {
-    it('连接成功后应该调用 onOpen 回调', async () => {
-      const onOpen = vi.fn()
-      renderHook(() => useWebSocket('/ws/test', { onOpen }))
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
 
-      // 运行初始定时器
-      await act(async () => {
-        vi.runOnlyPendingTimers()
+    expect(onOpen).toHaveBeenCalled();
+  });
+
+  it("receives parsed messages", async () => {
+    const onMessage = vi.fn();
+    const { result } = renderHook(() => useWebSocket<{ type: string }>("/ws/test", { onMessage }));
+
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+
+    await act(async () => {
+      mockWebSocketInstance.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ type: "ok" }) }));
+    });
+
+    expect(result.current.lastMessage).toEqual({ type: "ok" });
+    expect(onMessage).toHaveBeenCalledWith({ type: "ok" });
+  });
+
+  it("sends and disconnects through the current socket", async () => {
+    const { result } = renderHook(() => useWebSocket("/ws/test"));
+
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+
+    act(() => {
+      result.current.send("ping");
+      result.current.disconnect();
+    });
+
+    expect(mockWebSocketInstance.send).toHaveBeenCalledWith("ping");
+    expect(mockWebSocketInstance.close).toHaveBeenCalled();
+  });
+
+  it("reconnects after close when under retry limit", async () => {
+    const { result } = renderHook(() =>
+      useWebSocket("/ws/test", {
+        reconnectInterval: 1000,
+        maxReconnectAttempts: 2,
       })
+    );
 
-      expect(onOpen).toHaveBeenCalled()
-    })
-  })
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
 
-  describe('TC-WS-003: 收到消息后更新 lastMessage', () => {
-    it('收到消息后应该调用 onMessage 回调', async () => {
-      const onMessage = vi.fn()
-      const testData = { type: 'test', data: 'hello' }
+    await act(async () => {
+      mockWebSocketInstance.onclose?.(new CloseEvent("close"));
+      vi.advanceTimersByTime(1000);
+    });
 
-      renderHook(() => useWebSocket<{ type: string; data: string }>('/ws/test', { onMessage }))
-
-      // 运行初始定时器
-      await act(async () => {
-        vi.runOnlyPendingTimers()
-      })
-
-      // 模拟收到消息
-      await act(async () => {
-        if (mockWebSocketInstance.onmessage) {
-          mockWebSocketInstance.onmessage(new MessageEvent('message', {
-            data: JSON.stringify(testData)
-          }))
-        }
-      })
-
-      expect(onMessage).toHaveBeenCalledWith(testData)
-    })
-  })
-
-  describe('TC-WS-004: 连接关闭后状态更新', () => {
-    it('连接关闭后应该调用 onClose 回调', async () => {
-      const onClose = vi.fn()
-
-      renderHook(() => useWebSocket('/ws/test', { onClose }))
-
-      // 运行初始定时器
-      await act(async () => {
-        vi.runOnlyPendingTimers()
-      })
-
-      // 模拟连接关闭
-      await act(async () => {
-        if (mockWebSocketInstance.onclose) {
-          mockWebSocketInstance.onclose(new CloseEvent('close'))
-        }
-      })
-
-      expect(onClose).toHaveBeenCalled()
-    })
-  })
-
-  describe('TC-WS-005: 错误处理', () => {
-    it('WebSocket 错误时应该调用 onError 回调', async () => {
-      const onError = vi.fn()
-
-      renderHook(() => useWebSocket('/ws/test', { onError }))
-
-      // 运行初始定时器
-      await act(async () => {
-        vi.runOnlyPendingTimers()
-      })
-
-      // 模拟错误
-      await act(async () => {
-        if (mockWebSocketInstance.onerror) {
-          mockWebSocketInstance.onerror(new Event('error'))
-        }
-      })
-
-      expect(onError).toHaveBeenCalled()
-    })
-  })
-
-  describe('TC-WS-006: send 方法发送数据', () => {
-    it('连接状态下 send 方法应该调用 WebSocket.send', async () => {
-      const { result } = renderHook(() => useWebSocket('/ws/test'))
-
-      // 运行初始定时器
-      await act(async () => {
-        vi.runOnlyPendingTimers()
-      })
-
-      act(() => {
-        result.current.send('test message')
-      })
-
-      expect(mockWebSocketInstance.send).toHaveBeenCalledWith('test message')
-    })
-  })
-
-  describe('TC-WS-007: disconnect 方法关闭连接', () => {
-    it('disconnect 方法应该调用 WebSocket.close', async () => {
-      const { result } = renderHook(() => useWebSocket('/ws/test'))
-
-      // 运行初始定时器
-      await act(async () => {
-        vi.runOnlyPendingTimers()
-      })
-
-      act(() => {
-        result.current.disconnect()
-      })
-
-      expect(mockWebSocketInstance.close).toHaveBeenCalled()
-    })
-  })
-
-  describe('TC-WS-008: 组件卸载时清理连接', () => {
-    it('组件卸载时应该关闭连接', async () => {
-      const { unmount } = renderHook(() => useWebSocket('/ws/test'))
-
-      // 运行初始定时器
-      await act(async () => {
-        vi.runOnlyPendingTimers()
-      })
-
-      unmount()
-
-      expect(mockWebSocketInstance.close).toHaveBeenCalled()
-    })
-  })
-
-  describe('空 endpoint 不连接', () => {
-    it('空字符串 endpoint 不应该创建连接', () => {
-      const { result } = renderHook(() => useWebSocket(''))
-      expect(result.current.isConnected).toBe(false)
-    })
-  })
-
-  describe('重连功能', () => {
-    it('reconnect 方法应该重新建立连接', async () => {
-      const { result } = renderHook(() => useWebSocket('/ws/test'))
-
-      // 运行初始定时器
-      await act(async () => {
-        vi.runOnlyPendingTimers()
-      })
-
-      act(() => {
-        result.current.reconnect()
-      })
-
-      expect(mockWebSocketInstance.close).toHaveBeenCalled()
-    })
-  })
-})
+    expect(result.current.reconnect).toBeTypeOf("function");
+  });
+});

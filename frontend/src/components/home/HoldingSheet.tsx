@@ -22,7 +22,6 @@ type HoldingSheetProps = {
 export const HoldingSheet = ({
   open,
   onClose,
-  selectedFund,
   editMode,
   onEditModeChange,
   inputAmount,

@@ -3,7 +3,7 @@
 import { ExternalLink, Newspaper, TrendingDown, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { NewsAnalysisResponse, NewsItem } from "@/components/home/types";
+import type { NewsItem } from "@/components/home/types";
 import { formatDateTime } from "@/components/home/utils";
 
 type NewsTimelineProps = {
@@ -12,89 +12,74 @@ type NewsTimelineProps = {
   onSelectNewsKey: (key: string) => void;
 };
 
-const SentimentBadge = ({ sentiment }: { sentiment: string }) => {
-  const isPositive = sentiment.toLowerCase().includes("positive") || sentiment === "利好";
-  const isNegative = sentiment.toLowerCase().includes("negative") || sentiment === "利空";
-  
+const resolveNewsKey = (item: NewsItem) => item.link || item.title;
+
+const SentimentFlag = ({ sentiment }: { sentiment?: string | null }) => {
+  if (!sentiment) return <span className="text-xs text-[var(--muted-foreground)]">未分析</span>;
+  const normalized = sentiment.toLowerCase();
+  const positive = normalized.includes("positive") || sentiment.includes("利好");
+  const negative = normalized.includes("negative") || sentiment.includes("利空");
+
   return (
-    <span
-      className={cn(
-        "text-[10px] font-medium",
-        isPositive ? "text-[var(--gain)]" : isNegative ? "text-[var(--loss)]" : "text-[var(--muted-foreground)]"
-      )}
-    >
-      {isPositive && <TrendingUp className="w-3 h-3 inline mr-1" />}
-      {isNegative && <TrendingDown className="w-3 h-3 inline mr-1" />}
+    <span className={cn("inline-flex items-center gap-1 text-xs", positive && "text-[var(--gain)]", negative && "text-[var(--loss)]", !positive && !negative && "text-[var(--muted-foreground)]")}>
+      {positive && <TrendingUp className="h-3 w-3" />}
+      {negative && <TrendingDown className="h-3 w-3" />}
       {sentiment}
     </span>
   );
 };
 
-const NewsItemCard = ({ 
-  item, 
-  isActive, 
-  onClick 
-}: { 
-  item: NewsItem; 
-  isActive: boolean;
-  onClick: () => void;
-}) => {
+export const NewsTimeline = ({ newsItems, selectedNewsKey, onSelectNewsKey }: NewsTimelineProps) => {
   return (
-    <button
-      className={cn(
-        "w-full text-left p-3 rounded-lg transition-colors",
-        isActive ? "bg-[var(--primary)]/10" : "hover:bg-[var(--muted)]"
-      )}
-      onClick={onClick}
-    >
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="text-[10px] text-[var(--muted-foreground)]">
-          {formatDateTime(item.published_at)}
-        </span>
-        {item.link && (
-          <a href={item.link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-            <ExternalLink className="w-3 h-3 text-[var(--muted-foreground)]" />
-          </a>
-        )}
-      </div>
-      <h4 className="text-sm font-medium mb-2 line-clamp-2">{item.title}</h4>
-      <div className="flex items-center gap-2">
-        {item.analysis && <SentimentBadge sentiment={item.analysis.sentiment} />}
-        {item.source && <span className="text-[10px] text-[var(--muted-foreground)]">{item.source}</span>}
-      </div>
-    </button>
-  );
-};
-
-export const NewsTimeline = ({
-  newsItems,
-  selectedNewsKey,
-  onSelectNewsKey,
-}: NewsTimelineProps) => {
-  return (
-    <div className="flex flex-col h-full rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
-      <div className="px-4 py-3 border-b border-[var(--border)]">
-        <div className="flex items-center gap-2">
-          <Newspaper className="w-4 h-4" />
-          <span className="font-medium text-sm">资讯</span>
-          <Badge variant="outline" className="text-[10px]">{newsItems.length}</Badge>
+    <aside className="surface-panel flex min-h-0 flex-col overflow-hidden">
+      <div className="border-b border-[var(--border)] px-4 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Newspaper className="h-4 w-4 text-[var(--primary)]" />
+            <div>
+              <div className="section-label">News Feed</div>
+              <div className="text-sm font-semibold">资讯联动</div>
+            </div>
+          </div>
+          <Badge variant="outline">{newsItems.length}</Badge>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-        {newsItems.map((item, idx) => (
-          <NewsItemCard
-            key={idx}
-            item={item}
-            isActive={selectedNewsKey === String(idx)}
-            onClick={() => onSelectNewsKey(String(idx))}
-          />
-        ))}
-        {!newsItems.length && (
-          <div className="flex flex-col items-center justify-center py-12 text-[var(--muted-foreground)]">
-            <div className="text-sm">暂无资讯</div>
-          </div>
-        )}
+
+      <div className="custom-scrollbar flex-1 overflow-y-auto px-3 py-3">
+        <div className="space-y-2">
+          {newsItems.map((item) => {
+            const key = resolveNewsKey(item);
+            const active = selectedNewsKey === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                className={cn(
+                  "w-full border px-3 py-3 text-left transition-colors",
+                  active ? "border-[var(--primary)] bg-[rgba(39,68,56,0.08)]" : "border-[rgba(184,174,157,0.6)] bg-[rgba(246,241,231,0.45)] hover:bg-[rgba(217,208,193,0.28)]"
+                )}
+                onClick={() => onSelectNewsKey(key)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="section-label">{formatDateTime(item.published_at)}</div>
+                  {item.link && (
+                    <a href={item.link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
+                      <ExternalLink className="h-4 w-4" />
+                    </a>
+                  )}
+                </div>
+                <div className="mt-2 line-clamp-2 text-sm font-medium leading-6">{item.title}</div>
+                <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+                  <SentimentFlag sentiment={item.analysis?.sentiment} />
+                  <span className="text-[var(--muted-foreground)]">{item.source || "RSS"}</span>
+                </div>
+              </button>
+            );
+          })}
+
+          {!newsItems.length && <div className="px-2 py-10 text-center text-sm text-[var(--muted-foreground)]">当前没有可展示的新闻流。</div>}
+        </div>
       </div>
-    </div>
+    </aside>
   );
 };

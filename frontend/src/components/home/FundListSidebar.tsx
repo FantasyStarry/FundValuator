@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ChevronRight, Search, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { Search, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { FundInfo } from "@/components/home/types";
+import type { FundInfo } from "@/components/home/types";
 
 type FundListSidebarProps = {
   funds: (FundInfo & { computedAmount?: number })[];
@@ -18,104 +17,31 @@ type FundListSidebarProps = {
   onQuickTrade: (code: string) => void;
 };
 
-const AnimatedPercent = ({ value }: { value: number | null }) => {
-  const [flash, setFlash] = useState(false);
-  const prevValue = useRef(value);
+const PercentBadge = ({ value }: { value: number | null }) => {
+  if (value === null || value === undefined) {
+    return <span className="font-mono text-xs text-[var(--muted-foreground)]">--</span>;
+  }
 
-  useEffect(() => {
-    if (prevValue.current !== value) {
-      setFlash(true);
-      const timer = setTimeout(() => setFlash(false), 400);
-      prevValue.current = value;
-      return () => clearTimeout(timer);
-    }
-  }, [value]);
-
-  if (value === null) return <span className="text-sm text-[var(--muted-foreground)]">—</span>;
-
-  const isPositive = value >= 0;
+  const positive = value >= 0;
   return (
-    <div
+    <span
       className={cn(
-        "flex items-center gap-1 px-2 py-0.5 rounded font-mono text-xs font-semibold",
-        flash && "flash-update",
-        isPositive 
-          ? "text-[var(--gain)]" 
-          : "text-[var(--loss)]"
+        "inline-flex items-center gap-1 border px-2 py-1 font-mono text-xs font-semibold",
+        positive
+          ? "border-[rgba(39,68,56,0.28)] bg-[rgba(39,68,56,0.08)] text-[var(--gain)]"
+          : "border-[rgba(108,47,42,0.28)] bg-[rgba(108,47,42,0.08)] text-[var(--loss)]"
       )}
     >
-      {isPositive ? (
-        <TrendingUp className="w-3 h-3" />
-      ) : (
-        <TrendingDown className="w-3 h-3" />
-      )}
-      <span>{isPositive ? "+" : ""}{value.toFixed(2)}%</span>
-    </div>
+      {positive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+      {positive ? "+" : ""}
+      {value.toFixed(2)}%
+    </span>
   );
 };
 
-const FundItem = ({ 
-  fund, 
-  isSelected, 
-  onClick 
-}: { 
-  fund: FundInfo; 
-  isSelected: boolean; 
-  onClick: () => void;
-}) => {
-  return (
-    <div
-      className={cn(
-        "p-3 rounded-lg cursor-pointer transition-colors",
-        isSelected 
-          ? "bg-[var(--primary)] text-white" 
-          : "hover:bg-[var(--muted)]"
-      )}
-      onClick={onClick}
-    >
-      <div className="flex justify-between items-start mb-1">
-        <div className="flex-1 min-w-0 pr-2">
-          <h3 className="font-medium text-sm truncate">
-            {fund.name}
-          </h3>
-        </div>
-        <AnimatedPercent value={fund.estimate_pct ?? null} />
-      </div>
-      
-      <div className="flex justify-between items-center">
-        <Badge 
-          variant="outline" 
-          className={cn(
-            "text-[10px] font-mono",
-            isSelected ? "bg-white/20 border-white/30 text-white" : "bg-[var(--muted)] border-transparent"
-          )}
-        >
-          {fund.code}
-        </Badge>
-        <ChevronRight 
-          className={cn(
-            "w-4 h-4",
-            isSelected ? "text-white/80" : "text-[var(--muted-foreground)]"
-          )}
-        />
-      </div>
-      
-      {(fund.amount > 0 || fund.shares > 0) && (
-        <div className="mt-2 pt-2 border-t border-current/10">
-          <div className="flex items-center justify-between text-xs opacity-80">
-            <span>持有金额</span>
-            <span className="font-mono font-medium">
-              ¥{(
-                fund.mode === "amount" 
-                  ? fund.amount 
-                  : (fund as FundInfo & { computedAmount?: number }).computedAmount ?? fund.shares
-              ).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+const computeHoldingAmount = (fund: FundInfo & { computedAmount?: number }) => {
+  if (fund.mode === "amount") return fund.amount;
+  return fund.computedAmount ?? fund.shares;
 };
 
 export const FundListSidebar = ({
@@ -127,75 +53,88 @@ export const FundListSidebar = ({
   onOpenHoldingSheet,
   onQuickTrade,
 }: FundListSidebarProps) => {
-  const totalFunds = funds.length;
-  const gainCount = funds.filter(f => (f.estimate_pct ?? 0) >= 0).length;
-  const lossCount = totalFunds - gainCount;
+  const gainCount = funds.filter((fund) => (fund.estimate_pct ?? 0) >= 0).length;
+  const lossCount = funds.length - gainCount;
 
   return (
-    <aside className="flex flex-col min-h-0 rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
-      <div className="px-4 py-3 border-b border-[var(--border)]">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <Wallet className="w-4 h-4" />
-            <span className="font-medium text-sm">基金</span>
-            <Badge variant="outline" className="text-[10px] ml-1">
-              {totalFunds}
-            </Badge>
+    <aside className="surface-panel flex min-h-0 flex-col overflow-hidden">
+      <div className="border-b border-[var(--border)] px-4 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Wallet className="h-4 w-4 text-[var(--primary)]" />
+            <div>
+              <div className="section-label">Scope</div>
+              <div className="text-sm font-semibold">监控基金池</div>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-[var(--gain)]">{gainCount}涨</span>
-            <span className="text-[var(--muted-foreground)]">/</span>
-            <span className="text-[var(--loss)]">{lossCount}跌</span>
-          </div>
+          <Badge variant="outline">{funds.length}</Badge>
+        </div>
+        <div className="mt-3 flex gap-3 text-xs">
+          <span className="text-[var(--gain)]">上涨 {gainCount}</span>
+          <span className="text-[var(--muted-foreground)]">下跌 {lossCount}</span>
         </div>
       </div>
 
-      <div className="p-3 border-b border-[var(--border)]">
+      <div className="border-b border-[var(--border)] p-4">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--muted-foreground)]" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
           <Input
-            className="pl-9 h-9 text-sm"
-            placeholder="搜索基金..."
+            className="pl-9"
+            placeholder="筛选已监控基金"
             value={listQuery}
             onChange={(e) => onListQueryChange(e.target.value)}
           />
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-        {funds.map((fund) => (
-          <FundItem
-            key={fund.code}
-            fund={fund}
-            isSelected={selectedCode === fund.code}
-            onClick={() => onSelectCode(fund.code)}
-          />
-        ))}
-        {!funds.length && (
-          <div className="flex flex-col items-center justify-center py-12 text-[var(--muted-foreground)]">
-            <div className="text-sm">暂无基金</div>
-            <div className="text-xs mt-1">搜索添加</div>
-          </div>
-        )}
+      <div className="custom-scrollbar flex-1 overflow-y-auto px-3 py-3">
+        <div className="space-y-2">
+          {funds.map((fund) => {
+            const isSelected = selectedCode === fund.code;
+            return (
+              <button
+                key={fund.code}
+                type="button"
+                className={cn("fund-item w-full text-left", isSelected && "selected")}
+                onClick={() => onSelectCode(fund.code)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{fund.name}</div>
+                    <div className="mt-1 font-mono text-xs text-[var(--muted-foreground)]">{fund.code}</div>
+                  </div>
+                  <PercentBadge value={fund.estimate_pct ?? null} />
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="data-tile">
+                    <div className="text-[var(--muted-foreground)]">持仓规模</div>
+                    <div className="mt-1 font-mono text-sm">{computeHoldingAmount(fund).toFixed(2)}</div>
+                  </div>
+                  <div className="data-tile">
+                    <div className="text-[var(--muted-foreground)]">记录方式</div>
+                    <div className="mt-1 text-sm">{fund.mode === "amount" ? "金额" : "份额"}</div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+
+          {!funds.length && (
+            <div className="px-2 py-10 text-center text-sm text-[var(--muted-foreground)]">
+              当前没有监控中的基金，请在上方搜索并纳入监控。
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="p-3 border-t border-[var(--border)]">
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            className="flex-1 h-9 text-sm"
-            onClick={onOpenHoldingSheet}
-          >
-            更新持仓
-          </Button>
-          <Button
-            className="flex-1 h-9 text-sm"
-            onClick={() => selectedCode && onQuickTrade(selectedCode)}
-            disabled={!selectedCode}
-          >
-            快捷交易
-          </Button>
-        </div>
+      <div className="grid grid-cols-2 gap-3 border-t border-[var(--border)] p-4">
+        <Button variant="outline" onClick={onOpenHoldingSheet}>
+          调整持仓
+        </Button>
+        <Button onClick={() => selectedCode && onQuickTrade(selectedCode)} disabled={!selectedCode}>
+          快速交易
+        </Button>
       </div>
     </aside>
   );
