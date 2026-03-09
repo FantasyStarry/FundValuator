@@ -413,3 +413,24 @@ npx vitest run
 - 统一为低饱和工业风主题，主色调整为米色、灰色、深绿色和深红色，移除原有蓝色金融主题
 - 主页核心文案、状态提示与新闻选中逻辑已修正，减少乱码展示并修复新闻高亮键不一致问题
 - 全局基础组件样式已同步收敛：按钮、输入框、卡片、徽标改为更紧凑的后台系统风格
+## 2026-03-09 当前状态更新
+
+### 前端改版
+- 首页已重构为三栏企业级监控台：左侧基金池、中部组合与净值工作区、右侧新闻联动面板
+- 主题已统一为低饱和工业风，主色使用米色、灰色、深绿色和深红色
+- 首页核心文案、状态提示和新闻选中逻辑已修正
+- 前端基础校验已通过：`npm.cmd run lint`、`node .\node_modules\typescript\bin\tsc --noEmit`、`npm.cmd run test:run`
+
+### Docker 验证结果
+- 已实际执行 `docker compose build`，前后端镜像都能成功构建
+- 已实际执行 `docker compose up -d`，`nginx`、`frontend`、`backend`、`db`、`redis` 均成功启动
+- 已验证 `http://localhost` 返回 `200`
+- 已验证 `http://localhost/api/portfolio/overview` 返回 `200`
+
+### 当前已知问题
+- `frontend` 容器当前可以启动，但 [Dockerfile.frontend](C:\Users\spongzi\Documents\Code\JiJIn\Dockerfile.frontend) 仍使用 `next start`。在 `output: "standalone"` 模式下，更推荐改为启动 `.next/standalone/server.js`
+- `backend` 容器日志中仍有 Redis 限流警告，问题位于 [backend/rate_limit.py](C:\Users\spongzi\Documents\Code\JiJIn\backend\rate_limit.py)。当前不影响首页和组合接口返回，但建议后续修复
+- `docker compose up -d` 时提示存在 orphan 容器 `jijin-postgres`，说明本机还有旧容器残留
+
+### 结论
+当前这套 Docker 配置已经可以完成构建、启动和基础访问验证，但还不是完全无告警状态。若要作为稳定交付版本，建议继续修复前端 standalone 启动方式和后端 Redis 限流实现。
