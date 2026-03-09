@@ -38,33 +38,34 @@
 - 净值走势图表（分时/近1月/近3月/近1年）
 - 重仓股票明细表格
 - 投资组合概览仪表盘
-- **现代化深色主题 UI**：专业金融风格，实时动画效果
+- **企业级工业风 UI**：低饱和中性色调，紧凑后台系统风格
 
 ## 🛠 技术架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Frontend                              │
-│  Next.js 16 + React 19 + Tailwind CSS 4 + ECharts           │
-│  Space Grotesk + JetBrains Mono 字体                        │
-│  WebSocket 实时数据推送                                      │
+│                         Nginx                                │
+│                    反向代理 (端口 80)                         │
 └─────────────────────────────────────────────────────────────┘
                               │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        Backend                               │
-│  FastAPI + Python 3.11+                                     │
-│  ├── 数据采集层 (AkShare / 新浪 / 腾讯 / 东方财富)            │
-│  ├── AI 分析层 (支持多种 AI 模型 API)                        │
-│  ├── 业务逻辑层 (估值计算 / 持仓管理)                         │
-│  └── WebSocket 服务 (实时推送)                               │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        Storage                               │
-│  PostgreSQL (主数据库) + Redis (缓存/会话)                   │
-└─────────────────────────────────────────────────────────────┘
+        ┌─────────────────────┴─────────────────────┐
+        │                                           │
+        ▼                                           ▼
+┌───────────────────────────┐        ┌───────────────────────────┐
+│         Frontend          │        │          Backend          │
+│  Next.js 16 + React 19   │        │  FastAPI + Python 3.11+  │
+│  Tailwind CSS 4 + ECharts │        │  ├── 数据采集层            │
+│  Space Grotesk + JetBrains│        │  ├── AI 分析层            │
+│  Mono 字体                │        │  ├── 业务逻辑层            │
+│  WebSocket 实时数据推送    │        │  └── WebSocket 服务       │
+└───────────────────────────┘        └───────────────────────────┘
+                                              │
+                                              ▼
+                          ┌───────────────────────────────────┐
+                          │           Storage                  │
+                          │  PostgreSQL (主数据库)             │
+                          │  Redis (缓存/会话)                 │
+                          └───────────────────────────────────┘
 ```
 
 ## 📦 项目结构
@@ -79,16 +80,17 @@ FundValuator/
 │   ├── data_sources.py        # 数据获取模块
 │   ├── models.py              # Pydantic 数据模型
 │   ├── storage.py             # PostgreSQL 存储层
+│   ├── rate_limit.py          # 限流实现
 │   ├── migrate_sqlite_to_pg.py # 数据迁移脚本
 │   ├── requirements.txt       # Python 依赖
 │   ├── pytest.ini             # pytest 配置
 │   ├── tests/                 # 测试目录
 │   │   ├── __init__.py
 │   │   ├── conftest.py        # 测试配置和 fixtures
-│   │   ├── test_funds.py      # 基金 API 测试 (28个)
-│   │   ├── test_transactions.py # 交易记录测试 (20个)
-│   │   ├── test_portfolio.py  # 组合概览测试 (15个)
-│   │   └── test_market.py     # 市场/WebSocket测试 (18个)
+│   │   ├── test_funds.py      # 基金 API 测试
+│   │   ├── test_transactions.py # 交易记录测试
+│   │   ├── test_portfolio.py  # 组合概览测试
+│   │   └── test_market.py     # 市场/WebSocket测试
 │   └── data/                  # 本地数据库文件
 │       └── app.db
 ├── frontend/                   # Next.js 前端应用
@@ -96,7 +98,7 @@ FundValuator/
 │   │   ├── app/               # 页面路由
 │   │   │   ├── layout.tsx
 │   │   │   ├── page.tsx       # 主页面
-│   │   │   ├── globals.css    # 全局样式 (深色金融主题)
+│   │   │   ├── globals.css    # 全局样式 (企业级工业风)
 │   │   │   └── __tests__/     # 页面测试
 │   │   ├── components/        # UI 组件
 │   │   │   ├── ui/            # shadcn/ui 组件
@@ -118,10 +120,15 @@ FundValuator/
 │   ├── package.json
 │   ├── tailwind.config.ts
 │   └── tsconfig.json
+├── nginx.conf                 # Nginx 反向代理配置
 ├── docker-compose.yml         # Docker 部署配置
+├── Dockerfile.backend         # 后端 Docker 镜像
+├── Dockerfile.frontend        # 前端 Docker 镜像
+├── AGENTS.md                  # 前端设计代理规则
 ├── AI_Fund_Analysis_Platform_PRD.md   # 产品需求文档
 ├── Development_Guide.md       # 开发指南
-└── Development_Analysis.md    # 技术分析文档
+├── Development_Analysis.md    # 技术分析文档
+└── UI优化建议报告.md          # UI 优化建议
 ```
 
 ## 🚀 快速开始
@@ -179,12 +186,26 @@ bun run start
 
 ### Docker 部署
 
+项目采用 Nginx 反向代理架构，包含以下服务：
+- `nginx`: 反向代理（80端口）
+- `frontend`: Next.js 前端
+- `backend`: FastAPI 后端
+- `db`: PostgreSQL 数据库
+- `redis`: Redis 缓存
+
 ```bash
+# 构建镜像
+docker compose build
+
 # 一键启动
-docker-compose up -d
+docker compose up -d
 
 # 查看日志
-docker-compose logs -f
+docker compose logs -f
+
+# 访问应用
+# 前端: http://localhost
+# 后端 API: http://localhost/api
 ```
 
 ## 🧪 测试
@@ -210,13 +231,17 @@ npx vitest run
 | 变量名 | 说明 | 默认值 | 必需 |
 |--------|------|--------|------|
 | `DATABASE_URL` | PostgreSQL 连接地址 | `postgresql://postgres:postgres@localhost:5432/jijin` | ✅ |
-| `DEEPSEEK_API_KEY` | AI 模型 API 密钥 (支持 DeepSeek/OpenAI/Gemini 等) | - | ✅ |
-| `DEEPSEEK_BASE_URL` | AI 模型 API 地址 | `https://api.deepseek.com` | ❌ |
-| `DEEPSEEK_MODEL` | 使用的模型名称 | `deepseek-chat` | ❌ |
+| `DEEPSEEK_API_KEY` | DeepSeek AI 模型 API 密钥 | - | ❌ |
+| `DEEPSEEK_BASE_URL` | DeepSeek AI 模型 API 地址 | `https://api.deepseek.com` | ❌ |
+| `DEEPSEEK_MODEL` | DeepSeek 使用的模型名称 | `deepseek-chat` | ❌ |
+| `MIMO_API_KEY` | MIMO AI 模型 API 密钥 | - | ❌ |
+| `MIMO_BASE_URL` | MIMO AI 模型 API 地址 | - | ❌ |
+| `MIMO_MODEL` | MIMO 使用的模型名称 | - | ❌ |
 | `REDIS_URL` | Redis 连接地址 | - | ❌ |
 | `NEWS_RSS_URL` | 新闻 RSS 源地址 | 财联社 RSS | ❌ |
-| `NEWS_CACHE_TTL_SEC` | 新闻缓存时间(秒) | `3600` | ❌ |
-| `NEWS_REFRESH_INTERVAL_SEC` | 新闻刷新间隔(秒) | `300` | ❌ |
+| `NEWS_CACHE_TTL_SEC` | 新闻缓存时间(秒) | `300` | ❌ |
+| `NEWS_REFRESH_INTERVAL_SEC` | 新闻刷新间隔(秒) | `60` | ❌ |
+| `WS_SECRET_TOKEN` | WebSocket 密钥 | - | ❌ |
 
 ## 📡 API 接口
 
@@ -285,9 +310,10 @@ npx vitest run
 
 ## 🎨 UI 设计特性
 
-- **深色金融主题**：专业级深色配色，霓虹绿涨/珊瑚红跌
-- **玻璃态卡片**：毛玻璃效果，层次分明
-- **实时动画**：数字更新闪烁、脉冲指示器、平滑过渡
+- **企业级工业风主题**：低饱和工业风配色，米色、灰色、深绿色、深红色为主色调
+- **三栏监控台布局**：左侧基金池、中部组合与净值工作区、右侧新闻联动面板
+- **紧凑后台系统风格**：按钮、输入框、卡片、徽标等基础组件统一收敛为后台系统风格
+- **实时数据联动**：新闻选中联动基金池，减少乱码展示
 - **响应式布局**：完美适配桌面端
 - **JetBrains Mono 数字字体**：专业金融数字显示
 
@@ -345,7 +371,9 @@ npx vitest run
 - [x] 持仓更新弹窗
 - [x] 交易记录功能
 - [x] 响应式布局
-- [x] 深色金融主题 UI
+- [x] 企业级工业风主题 UI
+- [x] 三栏监控台布局
+- [x] 实时数据联动
 - [x] 实时动画效果
 
 #### 测试覆盖
@@ -406,31 +434,5 @@ npx vitest run
 
 ---
 
-**文档版本**: 1.1  
-**更新日期**: 2026-02-25
-## 2026-03-09 前端改版
-- 首页重构为企业级三栏监控台：左侧基金池、中部组合与净值工作区、右侧新闻联动面板
-- 统一为低饱和工业风主题，主色调整为米色、灰色、深绿色和深红色，移除原有蓝色金融主题
-- 主页核心文案、状态提示与新闻选中逻辑已修正，减少乱码展示并修复新闻高亮键不一致问题
-- 全局基础组件样式已同步收敛：按钮、输入框、卡片、徽标改为更紧凑的后台系统风格
-## 2026-03-09 当前状态更新
-
-### 前端改版
-- 首页已重构为三栏企业级监控台：左侧基金池、中部组合与净值工作区、右侧新闻联动面板
-- 主题已统一为低饱和工业风，主色使用米色、灰色、深绿色和深红色
-- 首页核心文案、状态提示和新闻选中逻辑已修正
-- 前端基础校验已通过：`npm.cmd run lint`、`node .\node_modules\typescript\bin\tsc --noEmit`、`npm.cmd run test:run`
-
-### Docker 验证结果
-- 已实际执行 `docker compose build`，前后端镜像都能成功构建
-- 已实际执行 `docker compose up -d`，`nginx`、`frontend`、`backend`、`db`、`redis` 均成功启动
-- 已验证 `http://localhost` 返回 `200`
-- 已验证 `http://localhost/api/portfolio/overview` 返回 `200`
-
-### 当前已知问题
-- `frontend` 容器当前可以启动，但 [Dockerfile.frontend](C:\Users\spongzi\Documents\Code\JiJIn\Dockerfile.frontend) 仍使用 `next start`。在 `output: "standalone"` 模式下，更推荐改为启动 `.next/standalone/server.js`
-- `backend` 容器日志中仍有 Redis 限流警告，问题位于 [backend/rate_limit.py](C:\Users\spongzi\Documents\Code\JiJIn\backend\rate_limit.py)。当前不影响首页和组合接口返回，但建议后续修复
-- `docker compose up -d` 时提示存在 orphan 容器 `jijin-postgres`，说明本机还有旧容器残留
-
-### 结论
-当前这套 Docker 配置已经可以完成构建、启动和基础访问验证，但还不是完全无告警状态。若要作为稳定交付版本，建议继续修复前端 standalone 启动方式和后端 Redis 限流实现。
+**文档版本**: 1.2  
+**更新日期**: 2026-03-09
